@@ -7,13 +7,11 @@ export default defineConfig(({ mode }) => {
   
   return {
     plugins: [react()],
-    // Ensure base path is relative for simpler deployments
     base: './',
     define: {
-      // Safely pass the API Key. Checks VITE_API_KEY first (standard), then API_KEY (fallback)
-      'process.env.API_KEY': JSON.stringify(env.VITE_API_KEY || env.API_KEY || ''),
-      // define process.env to empty object to prevent "process is not defined" crashes in 3rd party libs
-      'process.env': {}
+      // Only define the specific API KEY. 
+      // We rely on index.html polyfill for the general 'process' object to avoid build conflicts.
+      'process.env.API_KEY': JSON.stringify(env.VITE_API_KEY || env.API_KEY || '')
     }
   };
 });
