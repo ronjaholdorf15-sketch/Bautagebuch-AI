@@ -71,12 +71,6 @@ const PlusIcon = () => (
     </svg>
 );
 
-const PdfIcon = () => (
-    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-    </svg>
-);
-
 // --- Constants ---
 const STORAGE_KEY = 'glasfaser_app_config_v2';
 
@@ -387,22 +381,6 @@ export default function App() {
       ...prev,
       images: prev.images.filter((_, i) => i !== index)
     }));
-  };
-
-  const handlePreview = async () => {
-    if (selectedProjectIndex === -1) {
-        alert("Bitte wählen Sie zuerst ein Projekt aus, damit der Header korrekt erstellt wird.");
-        return;
-    }
-    const project = config.projects[selectedProjectIndex];
-    try {
-        const pdfBlob = await generateDiaryPdf(entry, project.name, config.companyLogo);
-        const url = URL.createObjectURL(pdfBlob);
-        window.open(url, '_blank');
-    } catch (e) {
-        alert("Fehler beim Generieren der Vorschau.");
-        console.error(e);
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -962,18 +940,10 @@ export default function App() {
                 </div>
             </div>
 
-            <div className="pt-6 border-t border-gray-100 flex flex-col sm:flex-row gap-4">
-                <Button 
-                    type="button" 
-                    variant="secondary" 
-                    onClick={handlePreview}
-                    className="w-full sm:w-auto flex items-center justify-center"
-                >
-                    <PdfIcon /> PDF Vorschau
-                </Button>
+            <div className="pt-6 border-t border-gray-100">
                 <Button 
                     type="submit" 
-                    className="w-full sm:flex-1 py-4 text-lg font-bold shadow-lg transform active:scale-95 transition-transform" 
+                    className="w-full py-4 text-lg font-bold shadow-lg transform active:scale-95 transition-transform" 
                     variant="primary"
                 >
                     Bericht abschließen & Hochladen
