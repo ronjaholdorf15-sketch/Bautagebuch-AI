@@ -198,10 +198,12 @@ export default function App() {
   };
 
   const removeTechnician = (id: string, code: string) => {
-    if (code.toLowerCase() === 'admin' || code.toLowerCase() === 'rh') {
-        alert("Die Haupt-Admins können nicht gelöscht werden.");
+    const protectedUsers = ['admin', 'rh'];
+    if (protectedUsers.includes(code.toLowerCase())) {
+        alert(`Der Benutzer '${code}' ist systemrelevant und kann nicht gelöscht werden.`);
         return;
     }
+    
     const newConfig = {
       ...config,
       technicians: config.technicians.filter(t => t.id !== id)
@@ -237,10 +239,43 @@ export default function App() {
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+        // Limit size to ~2MB roughly before base64
+        if (file.size > 2 * 1024 * 1024) {
+             alert("Das Logo ist zu groß. Bitte ein Bild unter 2MB wählen.");
+             return;
+        }
+
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64 = reader.result as string;
-        saveConfig({ ...config, companyLogo: base64 });
+        const img = new Image();
+        img.src = reader.result as string;
+        img.onload = () => {
+            // Compress/Resize logic
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const MAX_WIDTH = 600;
+            
+            let width = img.width;
+            let height = img.height;
+
+            if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            ctx?.drawImage(img, 0, 0, width, height);
+            
+            // Convert back to base64 with compression
+            const compressedBase64 = canvas.toDataURL('image/png', 0.8);
+            
+            try {
+                saveConfig({ ...config, companyLogo: compressedBase64 });
+            } catch (e) {
+                alert("Fehler beim Speichern: Speicherplatz voll.");
+            }
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -489,18 +524,25 @@ export default function App() {
             <div className="mb-8 border-b border-gray-100 pb-6">
                 <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600 mb-3">Benutzer & Techniker</h4>
                 <div className="space-y-2 mb-4 bg-brand-50 p-4 rounded-lg max-h-40 overflow-y-auto border border-brand-100">
-                    {config.technicians.map(tech => (
+                    {config.technicians.map(tech => {
+                        const isProtected = ['admin', 'rh'].includes(tech.code.toLowerCase());
+                        return (
                         <div key={tech.id} className="flex justify-between items-center border-b border-brand-100 last:border-0 py-2 text-sm">
                             <div>
                                 <span className="font-bold mr-3 w-10 inline-block uppercase text-brand-800 bg-white px-1 rounded text-center border border-brand-100">{tech.code}</span>
                                 <span className="text-gray-700">{tech.name}</span>
                                 {tech.role === 'admin' && <span className="ml-2 text-xs bg-brand-600 text-white px-1.5 py-0.5 rounded">Admin</span>}
                             </div>
-                            <button onClick={() => removeTechnician(tech.id, tech.code)} className="text-red-400 hover:text-red-600 disabled:opacity-30 transition-colors" disabled={tech.role === 'admin' && (tech.code === 'Admin' || tech.code === 'rh')}>
+                            <button 
+                                onClick={() => removeTechnician(tech.id, tech.code)} 
+                                disabled={isProtected}
+                                className={`text-red-400 hover:text-red-600 transition-colors ${isProtected ? 'opacity-30 cursor-not-allowed' : ''}`}
+                                title={isProtected ? "Dieser Benutzer kann nicht gelöscht werden" : "Löschen"}
+                            >
                                 <TrashIcon />
                             </button>
                         </div>
-                    ))}
+                    )})}
                 </div>
                 
                 <div className="grid grid-cols-2 gap-3 mb-3">
