@@ -8,7 +8,11 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    base: './',
+    base: '/', // Changed from ./ to / for better Vercel routing
+    build: {
+      outDir: 'dist',
+      emptyOutDir: true,
+    },
     define: {
       // Safely inject the API key. If missing, defaults to empty string.
       'process.env.API_KEY': JSON.stringify(env.API_KEY || env.VITE_API_KEY || '')
