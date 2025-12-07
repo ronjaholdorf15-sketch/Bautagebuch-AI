@@ -1,11 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = process.env.API_KEY;
-let aiClient: GoogleGenAI | null = null;
-
-if (apiKey) {
-  aiClient = new GoogleGenAI({ apiKey });
-}
+// Initialize Gemini Client with process.env.API_KEY as per guidelines.
+// We assume this variable is pre-configured and valid.
+const aiClient = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Helper: Convert File to Base64 for Gemini
 const fileToGenerativePart = async (file: File) => {
@@ -28,8 +25,6 @@ const fileToGenerativePart = async (file: File) => {
 };
 
 export const enhanceDiaryEntry = async (text: string, activity: string): Promise<string> => {
-  if (!aiClient) return text;
-
   try {
     const prompt = `
       Du bist ein professioneller Bauleiter für Glasfaserausbau.
@@ -55,7 +50,7 @@ export const enhanceDiaryEntry = async (text: string, activity: string): Promise
 };
 
 export const analyzeImagesForReport = async (images: File[], activity: string): Promise<string> => {
-    if (!aiClient || images.length === 0) return "";
+    if (images.length === 0) return "";
 
     try {
         const imageParts = await Promise.all(images.map(fileToGenerativePart));
@@ -89,7 +84,7 @@ export const analyzeImagesForReport = async (images: File[], activity: string): 
 };
 
 export const suggestMissingWork = async (doneDescription: string, activity: string): Promise<string> => {
-    if (!aiClient || !doneDescription) return "";
+    if (!doneDescription) return "";
 
     try {
         const prompt = `

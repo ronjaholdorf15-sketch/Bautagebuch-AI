@@ -4,7 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>IT-KOM Bautagebuch</title>
-    <!-- Tailwind CSS via CDN for simplicity (Vite will bundle the rest) -->
+    <!-- Polyfill for 'process' to prevent crashes in libraries expecting Node.js env -->
+    <script>
+      window.process = {
+        env: {
+          NODE_ENV: 'production'
+        }
+      };
+      
+      // Global Error Handler: If App crashes before React mounts, show error on screen
+      window.onerror = function(message, source, lineno, colno, error) {
+        const errorContainer = document.getElementById('error-container');
+        if (errorContainer) {
+            errorContainer.style.display = 'block';
+            document.getElementById('error-message').innerText = 
+                "Fehler beim Starten:\n" + message + "\n" + (error ? error.stack : '');
+            document.getElementById('loading-spinner').style.display = 'none';
+        }
+      };
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -12,11 +30,11 @@
           extend: {
             colors: {
               brand: {
-                50: '#f0f7ff',   /* Sehr helles Blau für Hintergründe */
+                50: '#f0f7ff',
                 100: '#e0effe',
-                400: '#3ABBCB',  /* Glasfaser Cyan */
+                400: '#3ABBCB',
                 500: '#2554a3',
-                600: '#1B3E78',  /* IT-KOM Hauptblau (Dunkel) */
+                600: '#1B3E78',
                 700: '#163260',
                 800: '#13284a',
                 900: '#0f2344',
@@ -30,25 +48,14 @@
       }
     </script>
     <style>
-      /* Custom scrollbar for better aesthetics */
-      ::-webkit-scrollbar {
-        width: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #f1f1f1;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #94a3b8;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #64748b;
-      }
-      .italic-brand {
-        font-style: italic;
-      }
+      ::-webkit-scrollbar { width: 8px; }
+      ::-webkit-scrollbar-track { background: #f1f1f1; }
+      ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+      .italic-brand { font-style: italic; }
+      #error-container { display: none; padding: 20px; background: #fee2e2; color: #b91c1c; font-family: monospace; white-space: pre-wrap; margin: 20px; border-radius: 8px; border: 2px solid #ef4444; }
     </style>
-  <script type="importmap">
+<script type="importmap">
 {
   "imports": {
     "react": "https://aistudiocdn.com/react@^19.2.1",
@@ -63,9 +70,16 @@
 </script>
 </head>
   <body class="bg-slate-50 text-slate-900 font-sans antialiased">
+    
+    <!-- Error Container -->
+    <div id="error-container">
+        <h3 style="font-weight: bold; margin-bottom: 10px;">Ein kritischer Fehler ist aufgetreten:</h3>
+        <div id="error-message"></div>
+    </div>
+
     <div id="root">
-      <!-- Fallback / Loading UI before React mounts -->
-      <div style="height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #f8fafc;">
+      <!-- Loading UI -->
+      <div id="loading-spinner" style="height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #f8fafc;">
         <svg class="animate-spin" style="width: 64px; height: 64px; color: #1B3E78; margin-bottom: 24px;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
           <circle style="opacity: 0.25;" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
           <path style="opacity: 0.75;" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -74,7 +88,6 @@
         <p style="color: #64748b; margin-top: 8px; font-family: sans-serif;">App wird geladen...</p>
       </div>
     </div>
-    <!-- Load the React Application via Vite -->
     <script type="module" src="./index.tsx"></script>
   </body>
 </html>
