@@ -640,7 +640,7 @@ export default function App() {
                         type="text" 
                         value={loginCode}
                         onChange={e => setLoginCode(e.target.value)}
-                        placeholder="Ihr Kürzel (z.B. MM)"
+                        placeholder="Ihr Kürzel"
                         className="w-full text-center text-xl p-3 border border-gray-300 rounded-lg focus:border-brand-600 focus:ring-2 focus:ring-brand-200 outline-none uppercase tracking-widest placeholder-gray-400"
                         autoFocus
                       />
