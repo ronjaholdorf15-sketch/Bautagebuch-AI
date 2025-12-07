@@ -6,13 +6,22 @@ let aiClient: GoogleGenAI | null = null;
 // Helper to get or create the client only when needed (Lazy Loading)
 const getAiClient = () => {
   if (!aiClient) {
-    // Falls der Key leer ist, wird ein Dummy gesetzt, damit new GoogleGenAI nicht crasht.
-    // Der Fehler fliegt dann erst beim echten Aufruf der API.
     const apiKey = process.env.API_KEY || '';
+    
+    // Safety check: Don't crash if key is missing, just warn
     if (!apiKey) {
-      console.warn("API Key fehlt! KI-Funktionen werden nicht funktionieren.");
+      console.warn("API Key fehlt! KI-Funktionen werden deaktiviert.");
+      // We do NOT return here, we let it fail gracefully later or create a dummy client if possible,
+      // but creating with empty string might throw in some versions.
     }
-    aiClient = new GoogleGenAI({ apiKey });
+
+    try {
+        aiClient = new GoogleGenAI({ apiKey });
+    } catch (e) {
+        console.error("Fehler beim Initialisieren des Google Clients:", e);
+        // Do not re-throw, just leave aiClient null or let it fail on usage
+        return null;
+    }
   }
   return aiClient;
 };
@@ -40,12 +49,13 @@ const fileToGenerativePart = async (file: File) => {
 
 export const enhanceDiaryEntry = async (text: string, activity: string): Promise<string> => {
   if (!process.env.API_KEY) {
-    console.warn("Kein API Key gefunden.");
-    return text + " (KI nicht konfiguriert)";
+    return text; // Silent fail if no key
   }
 
   try {
     const client = getAiClient();
+    if (!client) throw new Error("Client initialization failed");
+
     const prompt = `
       Du bist ein professioneller Bauleiter für Glasfaserausbau.
       Formuliere die folgenden Notizen eines Technikers in einen professionellen, sachlichen Bautagebuch-Eintrag um.
@@ -71,10 +81,12 @@ export const enhanceDiaryEntry = async (text: string, activity: string): Promise
 
 export const analyzeImagesForReport = async (images: File[], activity: string): Promise<string> => {
     if (images.length === 0) return "";
-    if (!process.env.API_KEY) throw new Error("API Key fehlt.");
+    if (!process.env.API_KEY) throw new Error("API Key fehlt. Bitte in Vercel konfigurieren.");
 
     try {
         const client = getAiClient();
+        if (!client) throw new Error("Client initialization failed");
+
         const imageParts = await Promise.all(images.map(fileToGenerativePart));
         
         const prompt = `
@@ -111,6 +123,8 @@ export const suggestMissingWork = async (doneDescription: string, activity: stri
 
     try {
         const client = getAiClient();
+        if (!client) throw new Error("Client initialization failed");
+
         const prompt = `
             Basierend auf diesem Bautagebuch-Eintrag (Erledigt): "${doneDescription}"
             und der Tätigkeit: "${activity}".
