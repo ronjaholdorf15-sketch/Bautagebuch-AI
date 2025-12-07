@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>IT-KOM Bautagebuch</title>
+    <!-- Tailwind CSS via CDN for simplicity (Vite will bundle the rest) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -13,7 +14,7 @@
               brand: {
                 50: '#f0f7ff',   /* Sehr helles Blau für Hintergründe */
                 100: '#e0effe',
-                400: '#3ABBCB',  /* Glasfaser Cyan (aus dem Logo oben) */
+                400: '#3ABBCB',  /* Glasfaser Cyan */
                 500: '#2554a3',
                 600: '#1B3E78',  /* IT-KOM Hauptblau (Dunkel) */
                 700: '#163260',
@@ -50,11 +51,13 @@
   <script type="importmap">
 {
   "imports": {
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "vite": "https://aistudiocdn.com/vite@^7.2.6",
     "react/": "https://aistudiocdn.com/react@^19.2.1/",
     "react": "https://aistudiocdn.com/react@^19.2.1",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
-    "jspdf": "https://esm.sh/jspdf@2.5.1"
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0",
+    "jspdf": "https://aistudiocdn.com/jspdf@^3.0.4"
   }
 }
 </script>
@@ -71,7 +74,7 @@
         <p style="color: #64748b; margin-top: 8px; font-family: sans-serif;">App wird geladen...</p>
       </div>
     </div>
-    <!-- Load the React Application -->
-    <script type="module" src="./index.tsx"></script>
+    <!-- Load the React Application via Vite -->
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>
