@@ -1,0 +1,9 @@
+{
+  "name": "Finales Bautagebuch",
+  "description": "Digitales Bautagebuch für Glasfaser-Techniker mit Nextcloud-Integration und KI-Unterstützung.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
