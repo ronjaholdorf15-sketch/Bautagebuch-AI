@@ -73,6 +73,7 @@ const PlusIcon = () => (
 
 // --- Constants ---
 const STORAGE_KEY = 'glasfaser_app_config_v2';
+const APP_VERSION = 'v1.1.0';
 
 export default function App() {
   // --- Global State ---
@@ -666,7 +667,7 @@ export default function App() {
                   </form>
                   
                   <div className="mt-10 text-xs text-gray-400 border-t pt-4">
-                    IT-KOM Kommunikationstechnik GmbH
+                    IT-KOM Kommunikationstechnik GmbH <span className="block mt-1 text-gray-300">{APP_VERSION}</span>
                   </div>
               </div>
           </div>
