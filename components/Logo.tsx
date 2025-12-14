@@ -1,50 +1,69 @@
 
 import React from 'react';
 
-// HIER KÖNNEN SIE DAS FESTE LOGO DEFINIEREN.
-// Option A: Das bestehende SVG (Vektor-Grafik) beibehalten (wie unten).
-// Option B: Wenn Sie ein Bild (PNG/JPG) nutzen wollen, ersetzen Sie den Inhalt von DEFAULT_LOGO_XML 
-// durch einen leeren String und ändern die Logo-Komponente, um ein <img> Tag mit src="/logo.png" zurückzugeben.
-
+// FESTES LOGO DEFINITION
+// Design: Breiteres Layout (950px), mehr Abstand zwischen den Elementen für bessere Lesbarkeit.
 const HARDCODED_LOGO_SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 160" width="600" height="160" preserveAspectRatio="xMidYMid meet" style="height: 100%; width: auto;">
-  <path d="M 40 40 Q 180 10 350 30" fill="none" stroke="#3ABBCB" stroke-width="6" stroke-linecap="round" />
-  <circle cx="280" cy="24" r="6" fill="#3ABBCB" />
-  <circle cx="350" cy="30" r="4" fill="#3ABBCB" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 950 240" width="950" height="240" preserveAspectRatio="xMidYMid meet" style="height: 100%; width: auto;">
+  <defs>
+    <style>
+      .font-brand { font-family: Arial, Helvetica, sans-serif; font-weight: bold; font-style: italic; }
+      .font-sub { font-family: Arial, Helvetica, sans-serif; font-weight: bold; font-style: italic; }
+    </style>
+  </defs>
 
-  <path d="M 30 70 Q 200 40 450 60" fill="none" stroke="#2563eb" stroke-width="7" stroke-linecap="round" />
-  <circle cx="220" cy="50" r="9" fill="#2563eb" />
-  <circle cx="350" cy="53" r="7" fill="#2563eb" />
+  <!-- === LINKER BEREICH: SCHWÜNGE (Kometen) === -->
+  
+  <!-- Schwung 1 (Oben - Cyan) -->
+  <path d="M 40 45 C 180 15, 380 35, 520 38 L 520 40 C 380 38, 180 20, 40 52 Z" fill="#29B6D1" />
+  <circle cx="360" cy="35" r="5" fill="#29B6D1" />
+  <circle cx="450" cy="38" r="3" fill="#29B6D1" />
+  <circle cx="520" cy="39" r="2" fill="#29B6D1" />
 
-  <path d="M 20 110 Q 220 80 500 40" fill="none" stroke="#1B3E78" stroke-width="8" stroke-linecap="round" />
-  <circle cx="300" cy="85" r="12" fill="#1B3E78" />
-  <circle cx="420" cy="55" r="7" fill="#1B3E78" />
+  <!-- Schwung 2 (Mitte - Mittelblau) -->
+  <path d="M 30 95 C 200 55, 450 70, 600 70 L 600 73 C 450 74, 200 60, 30 105 Z" fill="#1D71B8" />
+  <circle cx="430" cy="73" r="11" fill="#1D71B8" />
+  <circle cx="530" cy="71" r="6" fill="#1D71B8" />
+  <circle cx="600" cy="71" r="3" fill="#1D71B8" />
 
-  <text x="260" y="135" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-style="italic" font-size="85" fill="#1B3E78">IT-KOM</text>
-  <rect x="345" y="105" width="25" height="10" fill="#1B3E78" />
+  <!-- Schwung 3 (Unten - Dunkelblau) -->
+  <path d="M 20 150 C 220 100, 500 110, 720 100 L 720 103 C 500 114, 220 108, 20 162 Z" fill="#133368" />
+  <circle cx="515" cy="113" r="14" fill="#133368" /> 
+  <circle cx="630" cy="106" r="7" fill="#133368" />
+  <circle cx="720" cy="101" r="3" fill="#133368" />
 
-  <g transform="translate(420, 30)" font-family="Arial, Helvetica, sans-serif" font-style="italic" text-anchor="end">
-    <text x="170" y="0" font-size="18" fill="#3ABBCB" font-weight="bold">Glasfaser</text>
-    <text x="170" y="22" font-size="18" fill="#2563eb" font-weight="bold">Schnelligkeit</text>
-    <text x="170" y="44" font-size="18" fill="#1B3E78" font-weight="bold">Zuverlässigkeit</text>
+
+  <!-- === RECHTER BEREICH: TEXT === -->
+
+  <!-- Schlagworte (Rechts Oben) - Größer und weiter rechts -->
+  <g transform="translate(40, 0)">
+    <text x="890" y="55" class="font-sub" font-size="28" fill="#29B6D1" text-anchor="end">Glasfaser</text>
+    <text x="890" y="90" class="font-sub" font-size="28" fill="#1D71B8" text-anchor="end">Schnelligkeit</text>
+    <text x="890" y="125" class="font-sub" font-size="28" fill="#133368" text-anchor="end">Zuverlässigkeit</text>
   </g>
 
-  <text x="10" y="158" font-family="Arial, Helvetica, sans-serif" font-style="italic" font-size="18" fill="#1B3E78" letter-spacing="3">TELEKOMMUNIKATIONSTECHNIK GMBH</text>
+  <!-- IT-KOM Haupttext - Auseinandergezogen -->
+  <!-- IT -->
+  <text x="490" y="195" class="font-brand" font-size="120" fill="#133368" text-anchor="end" letter-spacing="0">IT</text>
+  
+  <!-- Bindestrich (Breiter und mehr Abstand) -->
+  <rect x="510" y="155" width="50" height="16" fill="#133368" />
+  
+  <!-- KOM -->
+  <text x="580" y="195" class="font-brand" font-size="120" fill="#133368" letter-spacing="0">KOM</text>
+
+  <!-- Unterzeile - Mehr Sperrung (Spacing) um die Breite zu füllen -->
+  <text x="20" y="235" class="font-brand" font-size="24" fill="#133368" letter-spacing="8.5">TELEKOMMUNIKATIONSTECHNIK GMBH</text>
 </svg>
 `;
 
 interface LogoProps {
   className?: string;
-  // customLogo prop entfernt, da nicht mehr benötigt
 }
 
 export const Logo: React.FC<LogoProps> = ({ className = "h-16" }) => {
-  // Option B Implementierung (Beispiel):
-  // return <img src="/mein-festes-logo.png" className={className} alt="Logo" style={{ objectFit: 'contain' }} />;
-  
-  // Aktuelle Implementierung (SVG):
   let finalSvg = HARDCODED_LOGO_SVG;
-  // Style Injection für korrekte Darstellung
+  
   if (!finalSvg.includes('height: 100%') && !finalSvg.includes('height:100%')) {
       finalSvg = finalSvg.replace('<svg', '<svg style="height: 100%; width: auto;" ');
   }
@@ -57,20 +76,17 @@ export const Logo: React.FC<LogoProps> = ({ className = "h-16" }) => {
   );
 };
 
-// Hilfsfunktion: Gibt das feste Logo als PNG Base64 zurück für das PDF
 export const getLogoAsBase64 = async (): Promise<string> => {
     return new Promise((resolve, reject) => {
         try {
             const img = new Image();
             
-            // Wir laden immer das feste SVG
-            // (Wenn Sie Option B nutzen, setzen Sie hier src = "/mein-festes-logo.png")
             const svgBlob = new Blob([HARDCODED_LOGO_SVG], { type: 'image/svg+xml;charset=utf-8' });
             const src = URL.createObjectURL(svgBlob);
             
             img.onload = () => {
-                const targetWidth = 1200; // Hohe Auflösung für Druck
-                let targetHeight = 320; 
+                const targetWidth = 1800; // Höhere Auflösung
+                let targetHeight = 450; 
 
                 if (img.width > 0 && img.height > 0) {
                     targetHeight = (img.height / img.width) * targetWidth;
@@ -85,7 +101,7 @@ export const getLogoAsBase64 = async (): Promise<string> => {
                     URL.revokeObjectURL(src);
                     return reject(new Error("Canvas context failed"));
                 }
-                
+
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 const dataUrl = canvas.toDataURL('image/png');
                 
