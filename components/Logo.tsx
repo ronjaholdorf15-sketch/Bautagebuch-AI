@@ -35,7 +35,7 @@ interface LogoProps {
 
 export const Logo: React.FC<LogoProps> = ({ className = "h-16", customLogo }) => {
   // Wenn ein Custom Logo existiert (Base64 String), nutzen wir ein normales IMG Tag.
-  // Das funktioniert für PNG, JPG, GIF und SVG.
+  // Das funktioniert für PNG, JPG, GIF und SVG (als Data URL).
   if (customLogo) {
       return (
           <img 
@@ -47,8 +47,7 @@ export const Logo: React.FC<LogoProps> = ({ className = "h-16", customLogo }) =>
       );
   }
 
-  // Fallback: Das Standard-SVG rendern wir inline, damit es manipulierbar bleibt
-  // Wir stellen sicher, dass das SVG style-Attribute für responsive Darstellung hat
+  // Fallback: Das Standard-SVG rendern wir inline
   let finalSvg = DEFAULT_LOGO_XML;
   if (!finalSvg.includes('height: 100%') && !finalSvg.includes('height:100%')) {
       finalSvg = finalSvg.replace('<svg', '<svg style="height: 100%; width: auto;" ');
@@ -62,23 +61,27 @@ export const Logo: React.FC<LogoProps> = ({ className = "h-16", customLogo }) =>
   );
 };
 
-// Hilfsfunktion: Gibt den Base64 String für das PDF zurück
+// Hilfsfunktion: Gibt den Base64 String als PNG zurück für das PDF
 export const getLogoAsBase64 = async (customLogo?: string | null): Promise<string> => {
-    // Wenn wir schon ein Custom Logo haben, ist es bereits ein Data-URL (Base64)
-    // Wir können es direkt zurückgeben.
-    if (customLogo) {
-        return Promise.resolve(customLogo);
-    }
-
-    // Wenn kein Custom Logo, müssen wir das Standard-SVG in ein PNG rendern (für jsPDF)
     return new Promise((resolve, reject) => {
         try {
             const img = new Image();
-            const svgBlob = new Blob([DEFAULT_LOGO_XML], { type: 'image/svg+xml;charset=utf-8' });
-            const url = URL.createObjectURL(svgBlob);
             
+            // Wenn Custom Logo vorhanden ist, laden wir es (es ist bereits eine Data URL)
+            // Wenn nicht, erstellen wir einen Blob aus dem Standard-SVG
+            let src = customLogo;
+            let revokeUrl = false;
+
+            if (!src) {
+                const svgBlob = new Blob([DEFAULT_LOGO_XML], { type: 'image/svg+xml;charset=utf-8' });
+                src = URL.createObjectURL(svgBlob);
+                revokeUrl = true;
+            }
+
             img.onload = () => {
-                const targetWidth = 1200;
+                // Wir rendern alles auf ein Canvas, um ein sauberes PNG zu erhalten
+                // (Wichtig, falls das Quellmaterial SVG ist, da jsPDF SVGs nicht nativ als Bild einfügen kann)
+                const targetWidth = 1200; // Hohe Auflösung für Druck
                 let targetHeight = 320; 
 
                 if (img.width > 0 && img.height > 0) {
@@ -91,22 +94,23 @@ export const getLogoAsBase64 = async (customLogo?: string | null): Promise<strin
                 
                 const ctx = canvas.getContext('2d');
                 if (!ctx) {
-                    URL.revokeObjectURL(url);
+                    if (revokeUrl && src) URL.revokeObjectURL(src);
                     return reject(new Error("Canvas context failed"));
                 }
                 
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 const dataUrl = canvas.toDataURL('image/png');
-                URL.revokeObjectURL(url);
+                
+                if (revokeUrl && src) URL.revokeObjectURL(src);
                 resolve(dataUrl);
             };
             
             img.onerror = () => {
-                URL.revokeObjectURL(url);
+                if (revokeUrl && src) URL.revokeObjectURL(src);
                 reject(new Error("Image load failed"));
             };
             
-            img.src = url;
+            img.src = src!;
         } catch (e) {
             reject(e);
         }
