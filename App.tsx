@@ -73,7 +73,7 @@ const PlusIcon = () => (
 
 // --- Constants ---
 const STORAGE_KEY = 'glasfaser_app_config_v2';
-const APP_VERSION = 'v1.1.0';
+const APP_VERSION = 'v1.1.1';
 
 export default function App() {
   // --- Global State ---
