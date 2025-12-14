@@ -12,7 +12,11 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
-export const generateDiaryPdf = async (entry: DiaryEntry, projectName: string, companyLogo?: string): Promise<Blob> => {
+export const generateDiaryPdf = async (
+    entry: DiaryEntry, 
+    projectName: string, 
+    companyLogo?: string
+): Promise<Blob> => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 20;
@@ -40,9 +44,12 @@ export const generateDiaryPdf = async (entry: DiaryEntry, projectName: string, c
   if (companyLogo) {
       try {
         const logoProps = doc.getImageProperties(companyLogo);
-        const logoWidth = 50;
+        // Fixed standard width of 50 units for the PDF
+        const logoWidth = 50; 
         const logoHeight = (logoProps.height * logoWidth) / logoProps.width;
-        doc.addImage(companyLogo, 'JPEG', pageWidth - margin - logoWidth, 15, logoWidth, logoHeight);
+        
+        // Add image (auto-detect format from base64 data)
+        doc.addImage(companyLogo, pageWidth - margin - logoWidth, 15, logoWidth, logoHeight);
       } catch (e) {
           console.error("Failed to add logo to PDF", e);
       }

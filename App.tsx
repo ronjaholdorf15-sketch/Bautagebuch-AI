@@ -5,7 +5,7 @@ import * as nextcloudService from './services/nextcloudService';
 import * as geminiService from './services/geminiService';
 import { generateDiaryPdf } from './services/pdfService';
 import { Button } from './components/Button';
-import { Logo } from './components/Logo';
+import { Logo, getLogoAsBase64 } from './components/Logo';
 
 // --- Icons ---
 const CameraIcon = () => (
@@ -23,7 +23,7 @@ const SparklesIcon = () => (
 
 const PhotoSparklesIcon = () => (
     <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 00-1.423 1.423z" />
     </svg>
 );
 
@@ -71,11 +71,17 @@ const PlusIcon = () => (
     </svg>
 );
 
+const UploadIcon = () => (
+  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+  </svg>
+);
+
 // --- Constants ---
 const STORAGE_KEY = 'glasfaser_app_config_v2';
 const DRAFT_KEY = 'glasfaser_entry_draft_v1';
-const PROJECT_IDX_KEY = 'glasfaser_last_project_idx';
-const APP_VERSION = 'v1.1.2';
+const CUSTOM_LOGO_KEY = 'glasfaser_logo_v1';
+const APP_VERSION = 'v1.1.6';
 
 export default function App() {
   // --- Global State ---
@@ -83,6 +89,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<Technician | null>(null);
   const [loginCode, setLoginCode] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [customLogo, setCustomLogo] = useState<string | null>(null);
   
   // UI State
   const [showSettings, setShowSettings] = useState(false);
@@ -124,6 +131,7 @@ export default function App() {
 
   // --- Effects ---
   useEffect(() => {
+    // Load Config
     const stored = localStorage.getItem(STORAGE_KEY);
     let loadedConfig: AppConfig = { technicians: [], projects: [] };
     
@@ -133,6 +141,12 @@ export default function App() {
       } catch (e) { console.error("Config parse error"); }
     }
 
+    // Load Custom Logo (Base64 String)
+    const storedLogo = localStorage.getItem(CUSTOM_LOGO_KEY);
+    if (storedLogo) {
+        setCustomLogo(storedLogo);
+    }
+    
     // Bootstrap Admins if missing
     let updated = false;
     const requiredAdmins = [
@@ -165,9 +179,6 @@ export default function App() {
     if (status.step === 'form' && currentUser) {
         // Exclude images and sensitive/derived data from draft
         const { images, technician, ...draftData } = entry;
-        
-        // Save only if there's actual content (location or description) to avoid saving empty state over good draft
-        // or if it's a deliberate clear (length check handled manually)
         
         const payload = JSON.stringify({
             ...draftData,
@@ -223,7 +234,32 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
   };
 
-  // --- Handlers: Settings ---
+  // --- Handlers: Settings & Logo ---
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+        // Wir nutzen readAsDataURL für ALLE Bildtypen (SVG, PNG, JPG, GIF)
+        // Das erzeugt einen String wie "data:image/png;base64,..."
+        // Dieser kann direkt in <img src="..."> oder im PDF verwendet werden.
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const result = ev.target?.result as string;
+            if (result) {
+                setCustomLogo(result);
+                localStorage.setItem(CUSTOM_LOGO_KEY, result);
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+  };
+
+  const handleResetLogo = () => {
+      if (confirm("Möchten Sie das Logo auf den Standard (IT-KOM) zurücksetzen?")) {
+          setCustomLogo(null);
+          localStorage.removeItem(CUSTOM_LOGO_KEY);
+      }
+  };
+
   const addTechnician = () => {
     if (newTechName && newTechCode && newTechPassword) {
       if (config.technicians.find(t => t.code.toLowerCase() === newTechCode.toLowerCase())) {
@@ -289,51 +325,6 @@ export default function App() {
     saveConfig(newConfig);
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-        // Limit size to ~2MB roughly before base64
-        if (file.size > 2 * 1024 * 1024) {
-             alert("Das Logo ist zu groß. Bitte ein Bild unter 2MB wählen.");
-             return;
-        }
-
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const img = new Image();
-        img.src = reader.result as string;
-        img.onload = () => {
-            // Compress/Resize logic
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const MAX_WIDTH = 600;
-            
-            let width = img.width;
-            let height = img.height;
-
-            if (width > MAX_WIDTH) {
-                height *= MAX_WIDTH / width;
-                width = MAX_WIDTH;
-            }
-
-            canvas.width = width;
-            canvas.height = height;
-            ctx?.drawImage(img, 0, 0, width, height);
-            
-            // Convert back to base64 with compression
-            const compressedBase64 = canvas.toDataURL('image/png', 0.8);
-            
-            try {
-                saveConfig({ ...config, companyLogo: compressedBase64 });
-            } catch (e) {
-                alert("Fehler beim Speichern: Speicherplatz voll.");
-            }
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   // --- Handlers: Login ---
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -378,7 +369,6 @@ export default function App() {
     setIsAnalyzingImages(true);
     try {
         const generatedText = await geminiService.analyzeImagesForReport(entry.images, entry.activityType);
-        // Append or replace? Let's append if text exists, otherwise set.
         setEntry(prev => ({ 
             ...prev, 
             description: prev.description ? prev.description + "\n\n" + generatedText : generatedText 
@@ -450,7 +440,9 @@ export default function App() {
       setStatus({ step: 'uploading' });
       setUploadMessage("Generiere PDF-Bericht...");
       
-      const pdfBlob = await generateDiaryPdf(entry, project.name, config.companyLogo);
+      // Generate Logo for PDF (uses custom if available)
+      const logoBase64 = await getLogoAsBase64(customLogo);
+      const pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
       
       setUploadMessage(`Lade hoch zu: ${project.name}...`);
       await nextcloudService.uploadDiaryEntry(project, entry, pdfBlob);
@@ -482,12 +474,11 @@ export default function App() {
 
   const reuseData = () => {
       localStorage.removeItem(DRAFT_KEY); // Clear old draft
-      // Keep location, weather, activity, project. Reset images, description, missing, materials
       setEntry(prev => ({
           ...prev,
           description: '',
           missingWork: '',
-          materials: [], // Materials usually differ per house
+          materials: [], 
           images: []
       }));
       setStatus({ step: 'form' });
@@ -546,7 +537,7 @@ export default function App() {
       {/* Header */}
       <div className="sticky top-0 z-20 bg-white shadow-md border-b border-brand-100 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center flex-1">
-             <Logo src={config.companyLogo} className="h-12 md:h-16 w-auto object-contain" />
+             <Logo className="h-12 md:h-16 w-auto object-contain" customLogo={customLogo} />
              <span className="ml-4 font-bold text-brand-900 hidden lg:block text-xl border-l-2 border-brand-200 pl-4">Bautagebuch</span>
         </div>
         <div className="flex items-center gap-2">
@@ -583,26 +574,49 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-900 bg-opacity-70 p-4 overflow-y-auto backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6 border-b pb-4">
-              <h3 className="text-xl font-bold text-brand-900">Admin-Verwaltung</h3>
+              <div className="flex items-center">
+                  <Logo className="h-8 mr-3 w-auto" customLogo={customLogo} />
+                  <h3 className="text-xl font-bold text-brand-900">Admin-Verwaltung</h3>
+              </div>
               <button onClick={() => setShowSettings(false)} className="text-gray-400 hover:text-gray-600">
                 <CloseIcon />
               </button>
             </div>
 
-            {/* Logo Upload */}
+            {/* Logo Management Section */}
             <div className="mb-8 border-b border-gray-100 pb-6">
-                 <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600 mb-3">Firmenlogo</h4>
-                 <div className="flex items-center gap-4">
-                     {config.companyLogo ? (
-                         <img src={config.companyLogo} alt="Logo" className="h-12 w-auto object-contain border p-1 rounded" />
-                     ) : (
-                         <div className="h-12 w-32 bg-gray-100 flex items-center justify-center text-xs text-gray-400 rounded">Kein Logo</div>
-                     )}
-                     <label className="cursor-pointer bg-brand-50 hover:bg-brand-100 text-brand-700 px-3 py-2 rounded text-sm font-medium transition-colors">
-                         Logo hochladen...
-                         <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
-                     </label>
-                 </div>
+                <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600 mb-3">Firmenlogo</h4>
+                <div className="bg-brand-50 p-4 rounded-lg border border-brand-100">
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <p className="text-sm text-gray-600 mb-2">Aktuelles Logo:</p>
+                            <div className="border bg-white p-2 rounded shadow-sm inline-block">
+                                <Logo className="h-10 w-auto" customLogo={customLogo} />
+                            </div>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                            <label className="cursor-pointer inline-flex items-center px-4 py-2 bg-brand-600 text-white rounded-md text-sm font-medium hover:bg-brand-700 transition-colors shadow-sm">
+                                <UploadIcon />
+                                Bild Hochladen
+                                <input 
+                                    type="file" 
+                                    accept="image/*" 
+                                    className="hidden" 
+                                    onChange={handleLogoUpload}
+                                />
+                            </label>
+                            <span className="text-[10px] text-gray-500 text-center">SVG, PNG, JPG, GIF</span>
+                            {customLogo && (
+                                <button 
+                                    onClick={handleResetLogo}
+                                    className="text-xs text-red-500 hover:text-red-700 underline text-right"
+                                >
+                                    Zurücksetzen
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
             </div>
 
             {/* Technicians Section */}
@@ -715,7 +729,7 @@ export default function App() {
           <div className="max-w-md mx-auto mt-16 p-6">
               <div className="bg-white rounded-2xl shadow-xl p-8 text-center border-t-4 border-brand-600">
                   <div className="mb-8 flex justify-center">
-                    <Logo src={config.companyLogo} className="h-24 w-auto object-contain" />
+                    <Logo className="h-24 w-auto object-contain" customLogo={customLogo} />
                   </div>
                   <h2 className="text-xl font-bold mt-4 text-brand-900">Anmeldung</h2>
                   <p className="text-brand-500 text-sm mb-6">Willkommen beim digitalen Bautagebuch</p>
@@ -770,6 +784,9 @@ export default function App() {
             
             {/* Header Section of Form */}
             <div className="border-b border-gray-100 pb-4 mb-4">
+                <div className="mb-4">
+                   <Logo className="h-16 w-auto object-left" customLogo={customLogo} />
+                </div>
                 <h2 className="text-2xl font-bold text-brand-900">Tagesbericht erfassen</h2>
                 <p className="text-gray-500 text-sm">Bitte füllen Sie alle Felder gewissenhaft aus.</p>
             </div>

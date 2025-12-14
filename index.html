@@ -80,12 +80,41 @@
     <div id="root">
       <!-- Loading UI -->
       <div id="loading-spinner" style="height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #f8fafc;">
-        <svg class="animate-spin" style="width: 64px; height: 64px; color: #1B3E78; margin-bottom: 24px;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle style="opacity: 0.25;" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path style="opacity: 0.75;" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        <h2 style="font-size: 1.5rem; font-weight: bold; color: #1B3E78; font-family: sans-serif;">IT-KOM Bautagebuch</h2>
-        <p style="color: #64748b; margin-top: 8px; font-family: sans-serif;">App wird geladen...</p>
+        <!-- IT-KOM SVG Logo Inline -->
+        <div style="width: 280px; margin-bottom: 24px;">
+           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 160" width="600" height="160" preserveAspectRatio="xMidYMid meet" style="width: 100%; height: auto;">
+              <path d="M 40 40 Q 180 10 350 30" fill="none" stroke="#3ABBCB" stroke-width="6" stroke-linecap="round" />
+              <circle cx="280" cy="24" r="6" fill="#3ABBCB" />
+              <circle cx="350" cy="30" r="4" fill="#3ABBCB" />
+
+              <path d="M 30 70 Q 200 40 450 60" fill="none" stroke="#2563eb" stroke-width="7" stroke-linecap="round" />
+              <circle cx="220" cy="50" r="9" fill="#2563eb" />
+              <circle cx="350" cy="53" r="7" fill="#2563eb" />
+
+              <path d="M 20 110 Q 220 80 500 40" fill="none" stroke="#1B3E78" stroke-width="8" stroke-linecap="round" />
+              <circle cx="300" cy="85" r="12" fill="#1B3E78" />
+              <circle cx="420" cy="55" r="7" fill="#1B3E78" />
+
+              <text x="260" y="135" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-style="italic" font-size="85" fill="#1B3E78">IT-KOM</text>
+              <rect x="345" y="105" width="25" height="10" fill="#1B3E78" />
+
+              <g transform="translate(420, 30)" font-family="Arial, Helvetica, sans-serif" font-style="italic" text-anchor="end">
+                <text x="170" y="0" font-size="18" fill="#3ABBCB" font-weight="bold">Glasfaser</text>
+                <text x="170" y="22" font-size="18" fill="#2563eb" font-weight="bold">Schnelligkeit</text>
+                <text x="170" y="44" font-size="18" fill="#1B3E78" font-weight="bold">Zuverlässigkeit</text>
+              </g>
+
+              <text x="10" y="158" font-family="Arial, Helvetica, sans-serif" font-style="italic" font-size="18" fill="#1B3E78" letter-spacing="3">TELEKOMMUNIKATIONSTECHNIK GMBH</text>
+            </svg>
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 10px; color: #64748b; margin-top: 8px;">
+            <svg class="animate-spin" style="width: 20px; height: 20px; color: #1B3E78;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle style="opacity: 0.25;" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path style="opacity: 0.75;" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span style="font-family: sans-serif;">Bautagebuch wird geladen...</span>
+        </div>
       </div>
     </div>
     <script type="module" src="./index.tsx"></script>
