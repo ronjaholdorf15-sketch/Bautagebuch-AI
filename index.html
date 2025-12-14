@@ -83,7 +83,7 @@
         
         <!-- Logo Container -->
         <div id="loading-logo-wrapper" style="width: 280px; margin-bottom: 24px; display: flex; justify-content: center; align-items: center;">
-           <!-- Default Logo (wird via JS überschrieben, wenn custom logo da ist) -->
+           <!-- Default Logo (Fix im Code) -->
            <svg id="default-loading-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 160" width="600" height="160" preserveAspectRatio="xMidYMid meet" style="width: 100%; height: auto;">
               <path d="M 40 40 Q 180 10 350 30" fill="none" stroke="#3ABBCB" stroke-width="6" stroke-linecap="round" />
               <circle cx="280" cy="24" r="6" fill="#3ABBCB" />
@@ -109,22 +109,6 @@
               <text x="10" y="158" font-family="Arial, Helvetica, sans-serif" font-style="italic" font-size="18" fill="#1B3E78" letter-spacing="3">TELEKOMMUNIKATIONSTECHNIK GMBH</text>
             </svg>
         </div>
-
-        <!-- Script to immediately load custom logo if present in localStorage -->
-        <script>
-          try {
-            const savedLogo = localStorage.getItem('glasfaser_logo_v1');
-            if (savedLogo) {
-              const wrapper = document.getElementById('loading-logo-wrapper');
-              if (wrapper) {
-                // Ersetze das SVG durch das gespeicherte Bild
-                wrapper.innerHTML = '<img src="' + savedLogo + '" style="max-width: 100%; max-height: 160px; object-fit: contain;" alt="Logo" />';
-              }
-            }
-          } catch (e) {
-            console.warn("Konnte Logo nicht aus dem Speicher laden:", e);
-          }
-        </script>
         
         <div style="display: flex; align-items: center; gap: 10px; color: #64748b; margin-top: 8px;">
             <svg class="animate-spin" style="width: 20px; height: 20px; color: #1B3E78;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

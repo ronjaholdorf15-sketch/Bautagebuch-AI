@@ -80,8 +80,7 @@ const UploadIcon = () => (
 // --- Constants ---
 const STORAGE_KEY = 'glasfaser_app_config_v2';
 const DRAFT_KEY = 'glasfaser_entry_draft_v1';
-const CUSTOM_LOGO_KEY = 'glasfaser_logo_v1';
-const APP_VERSION = 'v1.2.1';
+const APP_VERSION = 'v1.2.2';
 
 export default function App() {
   // --- Global State ---
@@ -89,11 +88,6 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<Technician | null>(null);
   const [loginCode, setLoginCode] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-  
-  // LOGO STATE: Lazy initialization
-  const [customLogo, setCustomLogo] = useState<string | null>(() => {
-    return localStorage.getItem(CUSTOM_LOGO_KEY);
-  });
   
   // UI State
   const [showSettings, setShowSettings] = useState(false);
@@ -134,17 +128,6 @@ export default function App() {
   const [isGeneratingMissing, setIsGeneratingMissing] = useState(false);
 
   // --- Effects ---
-
-  // Listen for storage changes (to sync logo across tabs/windows)
-  useEffect(() => {
-      const handleStorageChange = (e: StorageEvent) => {
-          if (e.key === CUSTOM_LOGO_KEY) {
-              setCustomLogo(e.newValue);
-          }
-      };
-      window.addEventListener('storage', handleStorageChange);
-      return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
 
   useEffect(() => {
     // Load Config
@@ -242,30 +225,6 @@ export default function App() {
   const saveConfig = (newConfig: AppConfig) => {
     setConfig(newConfig);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
-  };
-
-  // --- Handlers: Settings & Logo ---
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-        // Wir nutzen readAsDataURL für ALLE Bildtypen (SVG, PNG, JPG, GIF)
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            const result = ev.target?.result as string;
-            if (result) {
-                setCustomLogo(result);
-                localStorage.setItem(CUSTOM_LOGO_KEY, result);
-            }
-        };
-        reader.readAsDataURL(file);
-    }
-  };
-
-  const handleResetLogo = () => {
-      if (confirm("Möchten Sie das Logo auf den Standard (IT-KOM) zurücksetzen?")) {
-          setCustomLogo(null);
-          localStorage.removeItem(CUSTOM_LOGO_KEY);
-      }
   };
 
   const addTechnician = () => {
@@ -448,8 +407,8 @@ export default function App() {
       setStatus({ step: 'uploading' });
       setUploadMessage("Generiere PDF-Bericht...");
       
-      // Generate Logo for PDF (uses custom if available)
-      const logoBase64 = await getLogoAsBase64(customLogo);
+      // Generate Logo for PDF (uses the hardcoded logo via helper)
+      const logoBase64 = await getLogoAsBase64();
       const pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
       
       setUploadMessage(`Lade hoch zu: ${project.name}...`);
@@ -545,7 +504,7 @@ export default function App() {
       {/* Header */}
       <div className="sticky top-0 z-20 bg-white shadow-md border-b border-brand-100 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center flex-1">
-             <Logo className="h-12 md:h-16 w-auto object-contain" customLogo={customLogo} />
+             <Logo className="h-12 md:h-16 w-auto object-contain" />
              <span className="ml-4 font-bold text-brand-900 hidden lg:block text-xl border-l-2 border-brand-200 pl-4">Bautagebuch</span>
         </div>
         <div className="flex items-center gap-2">
@@ -583,48 +542,12 @@ export default function App() {
           <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6 border-b pb-4">
               <div className="flex items-center">
-                  <Logo className="h-8 mr-3 w-auto" customLogo={customLogo} />
+                  <Logo className="h-8 mr-3 w-auto" />
                   <h3 className="text-xl font-bold text-brand-900">Admin-Verwaltung</h3>
               </div>
               <button onClick={() => setShowSettings(false)} className="text-gray-400 hover:text-gray-600">
                 <CloseIcon />
               </button>
-            </div>
-
-            {/* Logo Management Section */}
-            <div className="mb-8 border-b border-gray-100 pb-6">
-                <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600 mb-3">Firmenlogo</h4>
-                <div className="bg-brand-50 p-4 rounded-lg border border-brand-100">
-                    <div className="flex items-center justify-between mb-4">
-                        <div>
-                            <p className="text-sm text-gray-600 mb-2">Aktuelles Logo:</p>
-                            <div className="border bg-white p-2 rounded shadow-sm inline-block">
-                                <Logo className="h-10 w-auto" customLogo={customLogo} />
-                            </div>
-                        </div>
-                        <div className="flex flex-col gap-2">
-                            <label className="cursor-pointer inline-flex items-center px-4 py-2 bg-brand-600 text-white rounded-md text-sm font-medium hover:bg-brand-700 transition-colors shadow-sm">
-                                <UploadIcon />
-                                Bild Hochladen
-                                <input 
-                                    type="file" 
-                                    accept="image/*" 
-                                    className="hidden" 
-                                    onChange={handleLogoUpload}
-                                />
-                            </label>
-                            <span className="text-[10px] text-gray-500 text-center">SVG, PNG, JPG, GIF</span>
-                            {customLogo && (
-                                <button 
-                                    onClick={handleResetLogo}
-                                    className="text-xs text-red-500 hover:text-red-700 underline text-right"
-                                >
-                                    Zurücksetzen
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                </div>
             </div>
 
             {/* Technicians Section */}
@@ -737,7 +660,7 @@ export default function App() {
           <div className="max-w-md mx-auto mt-16 p-6">
               <div className="bg-white rounded-2xl shadow-xl p-8 text-center border-t-4 border-brand-600">
                   <div className="mb-8 flex justify-center">
-                    <Logo className="h-24 w-auto object-contain" customLogo={customLogo} />
+                    <Logo className="h-24 w-auto object-contain" />
                   </div>
                   <h2 className="text-xl font-bold mt-4 text-brand-900">Anmeldung</h2>
                   <p className="text-brand-500 text-sm mb-6">Willkommen beim digitalen Bautagebuch</p>
@@ -793,7 +716,7 @@ export default function App() {
             {/* Header Section of Form */}
             <div className="border-b border-gray-100 pb-4 mb-4">
                 <div className="mb-4">
-                   <Logo className="h-16 w-auto object-left" customLogo={customLogo} />
+                   <Logo className="h-16 w-auto object-left" />
                 </div>
                 <h2 className="text-2xl font-bold text-brand-900">Tagesbericht erfassen</h2>
                 <p className="text-gray-500 text-sm">Bitte füllen Sie alle Felder gewissenhaft aus.</p>

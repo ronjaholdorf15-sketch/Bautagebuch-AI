@@ -1,7 +1,12 @@
+
 import React from 'react';
 
-// Das Standard IT-KOM Logo als Fallback
-const DEFAULT_LOGO_XML = `
+// HIER KÖNNEN SIE DAS FESTE LOGO DEFINIEREN.
+// Option A: Das bestehende SVG (Vektor-Grafik) beibehalten (wie unten).
+// Option B: Wenn Sie ein Bild (PNG/JPG) nutzen wollen, ersetzen Sie den Inhalt von DEFAULT_LOGO_XML 
+// durch einen leeren String und ändern die Logo-Komponente, um ein <img> Tag mit src="/logo.png" zurückzugeben.
+
+const HARDCODED_LOGO_SVG = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 160" width="600" height="160" preserveAspectRatio="xMidYMid meet" style="height: 100%; width: auto;">
   <path d="M 40 40 Q 180 10 350 30" fill="none" stroke="#3ABBCB" stroke-width="6" stroke-linecap="round" />
   <circle cx="280" cy="24" r="6" fill="#3ABBCB" />
@@ -30,25 +35,16 @@ const DEFAULT_LOGO_XML = `
 
 interface LogoProps {
   className?: string;
-  customLogo?: string | null;
+  // customLogo prop entfernt, da nicht mehr benötigt
 }
 
-export const Logo: React.FC<LogoProps> = ({ className = "h-16", customLogo }) => {
-  // Wenn ein Custom Logo existiert (Base64 String), nutzen wir ein normales IMG Tag.
-  // Das funktioniert für PNG, JPG, GIF und SVG (als Data URL).
-  if (customLogo) {
-      return (
-          <img 
-            src={customLogo} 
-            alt="Firmenlogo" 
-            className={className}
-            style={{ objectFit: 'contain' }}
-          />
-      );
-  }
-
-  // Fallback: Das Standard-SVG rendern wir inline
-  let finalSvg = DEFAULT_LOGO_XML;
+export const Logo: React.FC<LogoProps> = ({ className = "h-16" }) => {
+  // Option B Implementierung (Beispiel):
+  // return <img src="/mein-festes-logo.png" className={className} alt="Logo" style={{ objectFit: 'contain' }} />;
+  
+  // Aktuelle Implementierung (SVG):
+  let finalSvg = HARDCODED_LOGO_SVG;
+  // Style Injection für korrekte Darstellung
   if (!finalSvg.includes('height: 100%') && !finalSvg.includes('height:100%')) {
       finalSvg = finalSvg.replace('<svg', '<svg style="height: 100%; width: auto;" ');
   }
@@ -61,26 +57,18 @@ export const Logo: React.FC<LogoProps> = ({ className = "h-16", customLogo }) =>
   );
 };
 
-// Hilfsfunktion: Gibt den Base64 String als PNG zurück für das PDF
-export const getLogoAsBase64 = async (customLogo?: string | null): Promise<string> => {
+// Hilfsfunktion: Gibt das feste Logo als PNG Base64 zurück für das PDF
+export const getLogoAsBase64 = async (): Promise<string> => {
     return new Promise((resolve, reject) => {
         try {
             const img = new Image();
             
-            // Wenn Custom Logo vorhanden ist, laden wir es (es ist bereits eine Data URL)
-            // Wenn nicht, erstellen wir einen Blob aus dem Standard-SVG
-            let src = customLogo;
-            let revokeUrl = false;
-
-            if (!src) {
-                const svgBlob = new Blob([DEFAULT_LOGO_XML], { type: 'image/svg+xml;charset=utf-8' });
-                src = URL.createObjectURL(svgBlob);
-                revokeUrl = true;
-            }
-
+            // Wir laden immer das feste SVG
+            // (Wenn Sie Option B nutzen, setzen Sie hier src = "/mein-festes-logo.png")
+            const svgBlob = new Blob([HARDCODED_LOGO_SVG], { type: 'image/svg+xml;charset=utf-8' });
+            const src = URL.createObjectURL(svgBlob);
+            
             img.onload = () => {
-                // Wir rendern alles auf ein Canvas, um ein sauberes PNG zu erhalten
-                // (Wichtig, falls das Quellmaterial SVG ist, da jsPDF SVGs nicht nativ als Bild einfügen kann)
                 const targetWidth = 1200; // Hohe Auflösung für Druck
                 let targetHeight = 320; 
 
@@ -94,23 +82,23 @@ export const getLogoAsBase64 = async (customLogo?: string | null): Promise<strin
                 
                 const ctx = canvas.getContext('2d');
                 if (!ctx) {
-                    if (revokeUrl && src) URL.revokeObjectURL(src);
+                    URL.revokeObjectURL(src);
                     return reject(new Error("Canvas context failed"));
                 }
                 
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 const dataUrl = canvas.toDataURL('image/png');
                 
-                if (revokeUrl && src) URL.revokeObjectURL(src);
+                URL.revokeObjectURL(src);
                 resolve(dataUrl);
             };
             
             img.onerror = () => {
-                if (revokeUrl && src) URL.revokeObjectURL(src);
+                URL.revokeObjectURL(src);
                 reject(new Error("Image load failed"));
             };
             
-            img.src = src!;
+            img.src = src;
         } catch (e) {
             reject(e);
         }
