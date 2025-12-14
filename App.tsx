@@ -81,7 +81,7 @@ const UploadIcon = () => (
 const STORAGE_KEY = 'glasfaser_app_config_v2';
 const DRAFT_KEY = 'glasfaser_entry_draft_v1';
 const CUSTOM_LOGO_KEY = 'glasfaser_logo_v1';
-const APP_VERSION = 'v1.1.7';
+const APP_VERSION = 'v1.1.8';
 
 export default function App() {
   // --- Global State ---
@@ -89,7 +89,12 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<Technician | null>(null);
   const [loginCode, setLoginCode] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-  const [customLogo, setCustomLogo] = useState<string | null>(null);
+  
+  // LOGO STATE: Lazy initialization to ensure it's loaded before first render
+  // This guarantees it is present immediately on page reload
+  const [customLogo, setCustomLogo] = useState<string | null>(() => {
+    return localStorage.getItem(CUSTOM_LOGO_KEY);
+  });
   
   // UI State
   const [showSettings, setShowSettings] = useState(false);
@@ -139,12 +144,6 @@ export default function App() {
       try {
         loadedConfig = JSON.parse(stored);
       } catch (e) { console.error("Config parse error"); }
-    }
-
-    // Load Custom Logo (Base64 String)
-    const storedLogo = localStorage.getItem(CUSTOM_LOGO_KEY);
-    if (storedLogo) {
-        setCustomLogo(storedLogo);
     }
     
     // Bootstrap Admins if missing
