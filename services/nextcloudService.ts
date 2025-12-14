@@ -1,5 +1,5 @@
 
-import { DiaryEntry, PublicProject } from '../types';
+import { DiaryEntry, PublicProject, AppConfig } from '../types';
 
 const normalizeBaseUrl = (url: string) => {
   try {
@@ -8,6 +8,14 @@ const normalizeBaseUrl = (url: string) => {
   } catch (e) {
     return url;
   }
+};
+
+const extractToken = (url: string) => {
+    const parts = url.split('/s/');
+    if (parts.length === 2) {
+      return parts[1].split('/')[0]; 
+    }
+    return '';
 };
 
 // Modified to accept PDF Blob and upload it via Public Share Token
@@ -79,4 +87,70 @@ export const uploadDiaryEntry = async (
 
     if (!imgRes.ok) throw new Error(`Bild-Upload fehlgeschlagen: ${fileName}`);
   }
+};
+
+// --- GLOBAL SYNC FUNCTIONS ---
+
+export interface GlobalSyncData {
+    technicians: AppConfig['technicians'];
+    projects: AppConfig['projects'];
+    customLogo: string | null;
+    updatedAt: string;
+}
+
+const CONFIG_FILENAME = 'bautagebuch_global_config.json';
+
+// Fetch global config from the sync link
+export const fetchAppConfig = async (syncLink: string): Promise<GlobalSyncData | null> => {
+    try {
+        const token = extractToken(syncLink);
+        if (!token) return null;
+
+        const baseUrl = normalizeBaseUrl(syncLink);
+        const webDavUrl = `${baseUrl}/public.php/webdav/${CONFIG_FILENAME}`;
+        
+        const response = await fetch(webDavUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Basic ${btoa(`${token}:`)}`,
+                'OCS-APIRequest': 'true'
+            }
+        });
+
+        if (response.ok) {
+            return await response.json();
+        }
+        return null;
+    } catch (e) {
+        console.error("Failed to fetch global config", e);
+        return null;
+    }
+};
+
+// Save global config to the sync link
+export const saveAppConfig = async (syncLink: string, data: GlobalSyncData): Promise<boolean> => {
+    try {
+        const token = extractToken(syncLink);
+        if (!token) return false;
+
+        const baseUrl = normalizeBaseUrl(syncLink);
+        const webDavUrl = `${baseUrl}/public.php/webdav/${CONFIG_FILENAME}`;
+        
+        const jsonString = JSON.stringify(data, null, 2);
+
+        const response = await fetch(webDavUrl, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Basic ${btoa(`${token}:`)}`,
+                'Content-Type': 'application/json',
+                'OCS-APIRequest': 'true'
+            },
+            body: jsonString
+        });
+
+        return response.ok;
+    } catch (e) {
+        console.error("Failed to save global config", e);
+        return false;
+    }
 };
