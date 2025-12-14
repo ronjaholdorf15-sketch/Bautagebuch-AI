@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppConfig, Technician, PublicProject, FormStatus, DiaryEntry, WeatherCondition, MaterialItem } from './types';
 import * as nextcloudService from './services/nextcloudService';
 import * as geminiService from './services/geminiService';
@@ -77,17 +77,11 @@ const UploadIcon = () => (
   </svg>
 );
 
-const CloudIcon = () => (
-    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-    </svg>
-);
-
 // --- Constants ---
 const STORAGE_KEY = 'glasfaser_app_config_v2';
 const DRAFT_KEY = 'glasfaser_entry_draft_v1';
 const CUSTOM_LOGO_KEY = 'glasfaser_logo_v1';
-const APP_VERSION = 'v1.2.0';
+const APP_VERSION = 'v1.2.1';
 
 export default function App() {
   // --- Global State ---
@@ -104,11 +98,9 @@ export default function App() {
   // UI State
   const [showSettings, setShowSettings] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [showSyncInput, setShowSyncInput] = useState(false); // For Login Screen
   const [status, setStatus] = useState<FormStatus>({ step: 'login' });
   const [uploadMessage, setUploadMessage] = useState("Daten werden hochgeladen...");
   const [draftRestored, setDraftRestored] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
 
   // Settings Temp State
   const [newTechName, setNewTechName] = useState('');
@@ -117,9 +109,6 @@ export default function App() {
   const [newTechIsAdmin, setNewTechIsAdmin] = useState(false);
   const [newProjName, setNewProjName] = useState('');
   const [newProjLink, setNewProjLink] = useState('');
-  
-  // Sync Link Input (for Login Screen and Settings)
-  const [tempSyncLink, setTempSyncLink] = useState('');
 
   // Material Input State
   const [matName, setMatName] = useState('');
@@ -157,7 +146,6 @@ export default function App() {
       return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  // Initialize Config and attempt Cloud Sync
   useEffect(() => {
     // Load Config
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -193,18 +181,15 @@ export default function App() {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(loadedConfig));
     }
     setConfig(loadedConfig);
-    if(loadedConfig.syncLink) {
-        setTempSyncLink(loadedConfig.syncLink);
-        // Trigger background sync if link exists
-        performCloudSync(loadedConfig.syncLink, false);
-    }
 
   }, []);
 
   // Effect: Auto-Save Draft
   useEffect(() => {
     if (status.step === 'form' && currentUser) {
+        // Exclude images and sensitive/derived data from draft
         const { images, technician, ...draftData } = entry;
+        
         const payload = JSON.stringify({
             ...draftData,
             projectIndex: selectedProjectIndex
@@ -213,7 +198,7 @@ export default function App() {
     }
   }, [entry, selectedProjectIndex, status.step, currentUser]);
 
-  // Effect: Restore Draft
+  // Effect: Restore Draft (Once when entering form)
   useEffect(() => {
     if (status.step === 'form' && currentUser) {
         const savedDraft = localStorage.getItem(DRAFT_KEY);
@@ -221,17 +206,20 @@ export default function App() {
             try {
                 const parsed = JSON.parse(savedDraft);
                 const { projectIndex, ...restEntry } = parsed;
+                
+                // Only restore if it looks valid
                 if (restEntry.date) {
                     setEntry(prev => ({
                         ...prev,
                         ...restEntry,
-                        technician: currentUser.name,
-                        images: [] 
+                        technician: currentUser.name, // Force current user
+                        images: [] // Images cannot be restored from local storage
                     }));
                     if (projectIndex >= 0) {
                         setSelectedProjectIndex(projectIndex);
                     }
                     setDraftRestored(true);
+                    // Hide toast after 3s
                     setTimeout(() => setDraftRestored(false), 3000);
                 }
             } catch (e) {
@@ -240,6 +228,7 @@ export default function App() {
         }
     }
   }, [status.step, currentUser]);
+
 
   // --- Helpers ---
   const extractToken = (url: string) => {
@@ -253,88 +242,19 @@ export default function App() {
   const saveConfig = (newConfig: AppConfig) => {
     setConfig(newConfig);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
-    
-    // If sync enabled, upload changes
-    if (newConfig.syncLink) {
-        uploadConfigToCloud(newConfig.syncLink, newConfig, customLogo);
-    }
-  };
-
-  // --- CLOUD SYNC LOGIC ---
-
-  const performCloudSync = async (link: string, showAlerts = true) => {
-      setIsSyncing(true);
-      const data = await nextcloudService.fetchAppConfig(link);
-      setIsSyncing(false);
-
-      if (data) {
-          // Merge Data
-          const newConfig: AppConfig = {
-              ...config,
-              technicians: data.technicians || config.technicians,
-              projects: data.projects || config.projects,
-              syncLink: link // Ensure link is saved
-          };
-          
-          // Save Config
-          setConfig(newConfig);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
-          
-          // Save Logo
-          if (data.customLogo) {
-              setCustomLogo(data.customLogo);
-              localStorage.setItem(CUSTOM_LOGO_KEY, data.customLogo);
-          } else if (data.customLogo === null) {
-              // If explicit null, reset
-              setCustomLogo(null);
-              localStorage.removeItem(CUSTOM_LOGO_KEY);
-          }
-
-          if (showAlerts) alert("Konfiguration und Logo erfolgreich synchronisiert!");
-          return true;
-      } else {
-          if (showAlerts) alert("Synchronisation fehlgeschlagen. Bitte Link prüfen.");
-          return false;
-      }
-  };
-
-  const uploadConfigToCloud = async (link: string, currentConfig: AppConfig, currentLogo: string | null) => {
-      if (!link) return;
-      // We do not show loading state for background uploads usually, but for explicit admin actions we might.
-      await nextcloudService.saveAppConfig(link, {
-          technicians: currentConfig.technicians,
-          projects: currentConfig.projects,
-          customLogo: currentLogo,
-          updatedAt: new Date().toISOString()
-      });
-  };
-
-  const handleManualConnect = async () => {
-      if (!tempSyncLink) {
-          alert("Bitte Link eingeben.");
-          return;
-      }
-      const success = await performCloudSync(tempSyncLink, true);
-      if (success) {
-          setShowSyncInput(false);
-      }
   };
 
   // --- Handlers: Settings & Logo ---
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+        // Wir nutzen readAsDataURL für ALLE Bildtypen (SVG, PNG, JPG, GIF)
         const reader = new FileReader();
         reader.onload = (ev) => {
             const result = ev.target?.result as string;
             if (result) {
                 setCustomLogo(result);
                 localStorage.setItem(CUSTOM_LOGO_KEY, result);
-                
-                // Trigger Upload if sync enabled
-                if (config.syncLink) {
-                    uploadConfigToCloud(config.syncLink, config, result);
-                }
             }
         };
         reader.readAsDataURL(file);
@@ -345,10 +265,6 @@ export default function App() {
       if (confirm("Möchten Sie das Logo auf den Standard (IT-KOM) zurücksetzen?")) {
           setCustomLogo(null);
           localStorage.removeItem(CUSTOM_LOGO_KEY);
-           // Trigger Upload if sync enabled
-           if (config.syncLink) {
-            uploadConfigToCloud(config.syncLink, config, null);
-        }
       }
   };
 
@@ -415,15 +331,6 @@ export default function App() {
       projects: config.projects.filter(p => p.token !== token)
     };
     saveConfig(newConfig);
-  };
-
-  const handleSetSyncLink = () => {
-     if(!tempSyncLink) return;
-     const newConfig = { ...config, syncLink: tempSyncLink };
-     saveConfig(newConfig);
-     // Try to push current config to this new link to initialize it
-     uploadConfigToCloud(tempSyncLink, newConfig, customLogo);
-     alert("Sync-Link gespeichert. Konfiguration wird hochgeladen.");
   };
 
   // --- Handlers: Login ---
@@ -541,12 +448,14 @@ export default function App() {
       setStatus({ step: 'uploading' });
       setUploadMessage("Generiere PDF-Bericht...");
       
+      // Generate Logo for PDF (uses custom if available)
       const logoBase64 = await getLogoAsBase64(customLogo);
       const pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
       
       setUploadMessage(`Lade hoch zu: ${project.name}...`);
       await nextcloudService.uploadDiaryEntry(project, entry, pdfBlob);
       
+      // Clear draft on success
       localStorage.removeItem(DRAFT_KEY);
       
       setStatus({ step: 'success' });
@@ -572,7 +481,7 @@ export default function App() {
   };
 
   const reuseData = () => {
-      localStorage.removeItem(DRAFT_KEY);
+      localStorage.removeItem(DRAFT_KEY); // Clear old draft
       setEntry(prev => ({
           ...prev,
           description: '',
@@ -585,6 +494,7 @@ export default function App() {
 
   // --- Views ---
 
+  // 1. Loading / Uploading
   if (status.step === 'uploading') {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
@@ -595,6 +505,7 @@ export default function App() {
     );
   }
 
+  // 2. Success
   if (status.step === 'success') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -620,9 +531,11 @@ export default function App() {
     );
   }
 
+  // 3. Main Layout
   return (
     <div className="min-h-screen bg-gray-50 pb-20 relative font-sans">
       
+      {/* Draft Restored Toast */}
       {draftRestored && (
           <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-full text-sm shadow-lg z-50 animate-bounce">
               Entwurf wiederhergestellt
@@ -643,14 +556,22 @@ export default function App() {
             )}
             
             {currentUser?.role === 'admin' && (
-                <button onClick={() => setShowSettings(true)} className="p-2 text-brand-600 hover:bg-brand-50 rounded-full transition-colors" title="Einstellungen">
-                   <SettingsIcon />
+                <button 
+                onClick={() => setShowSettings(true)}
+                className="p-2 text-brand-600 hover:bg-brand-50 rounded-full transition-colors"
+                title="Einstellungen"
+                >
+                <SettingsIcon />
                 </button>
             )}
 
             {currentUser && (
-                <button onClick={handleLogout} className="p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors" title="Abmelden">
-                    <LogoutIcon />
+                <button 
+                onClick={handleLogout}
+                className="p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 rounded-full transition-colors"
+                title="Abmelden"
+                >
+                <LogoutIcon />
                 </button>
             )}
         </div>
@@ -668,29 +589,6 @@ export default function App() {
               <button onClick={() => setShowSettings(false)} className="text-gray-400 hover:text-gray-600">
                 <CloseIcon />
               </button>
-            </div>
-            
-            {/* Sync Section */}
-            <div className="mb-8 border-b border-gray-100 pb-6 bg-blue-50 -mx-6 px-6 py-4">
-                <h4 className="text-sm font-bold uppercase tracking-wider text-blue-700 mb-3 flex items-center">
-                    <span className="mr-2"><CloudIcon /></span>
-                    Cloud Synchronisation
-                </h4>
-                <p className="text-xs text-blue-600 mb-3">
-                    Ein Nextcloud-Link, um Logo und Benutzerliste zentral zu speichern und mit anderen Geräten zu teilen.
-                </p>
-                <div className="flex gap-2">
-                    <input 
-                        className="border border-blue-200 rounded-md p-2 text-sm flex-1 focus:ring-2 focus:ring-blue-500 outline-none" 
-                        placeholder="Öffentlicher Nextcloud Link..." 
-                        value={tempSyncLink}
-                        onChange={e => setTempSyncLink(e.target.value)}
-                    />
-                    <Button onClick={handleSetSyncLink} variant="primary" className="bg-blue-600 hover:bg-blue-700">
-                        Speichern
-                    </Button>
-                </div>
-                {config.syncLink && <p className="text-xs text-green-600 mt-2">✓ Synchronisation aktiv</p>}
             </div>
 
             {/* Logo Management Section */}
@@ -836,39 +734,14 @@ export default function App() {
 
       {/* Login Screen */}
       {!currentUser ? (
-          <div className="max-w-md mx-auto mt-16 p-6 relative">
-              <div className="bg-white rounded-2xl shadow-xl p-8 text-center border-t-4 border-brand-600 relative">
+          <div className="max-w-md mx-auto mt-16 p-6">
+              <div className="bg-white rounded-2xl shadow-xl p-8 text-center border-t-4 border-brand-600">
                   <div className="mb-8 flex justify-center">
                     <Logo className="h-24 w-auto object-contain" customLogo={customLogo} />
                   </div>
                   <h2 className="text-xl font-bold mt-4 text-brand-900">Anmeldung</h2>
                   <p className="text-brand-500 text-sm mb-6">Willkommen beim digitalen Bautagebuch</p>
                   
-                  {/* Sync Connect UI on Login Screen */}
-                  {showSyncInput ? (
-                       <div className="mb-6 bg-blue-50 p-4 rounded-lg border border-blue-100">
-                           <h3 className="text-sm font-bold text-blue-800 mb-2">Cloud Synchronisation</h3>
-                           <input 
-                                className="w-full border border-blue-200 rounded p-2 text-sm mb-2" 
-                                placeholder="Nextcloud Link eingeben..."
-                                value={tempSyncLink}
-                                onChange={e => setTempSyncLink(e.target.value)}
-                           />
-                           <div className="flex gap-2">
-                               <Button onClick={handleManualConnect} isLoading={isSyncing} className="w-full text-xs">Verbinden</Button>
-                               <Button onClick={() => setShowSyncInput(false)} variant="secondary" className="w-full text-xs">Abbrechen</Button>
-                           </div>
-                       </div>
-                  ) : (
-                    <button 
-                        onClick={() => setShowSyncInput(true)} 
-                        className="absolute top-4 right-4 text-gray-400 hover:text-brand-600 transition-colors"
-                        title="Mit Cloud-Konfiguration verbinden"
-                    >
-                        <CloudIcon />
-                    </button>
-                  )}
-
                   <form onSubmit={handleLogin} className="space-y-4">
                       <input 
                         type="text" 
@@ -905,7 +778,7 @@ export default function App() {
               </div>
           </div>
       ) : (
-        // Main Form
+        // Main Form (only shown if currentUser is set)
         <div className="max-w-3xl mx-auto p-4 md:p-6 lg:p-8">
             
             {status.message && (
