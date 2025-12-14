@@ -73,7 +73,9 @@ const PlusIcon = () => (
 
 // --- Constants ---
 const STORAGE_KEY = 'glasfaser_app_config_v2';
-const APP_VERSION = 'v1.1.1';
+const DRAFT_KEY = 'glasfaser_entry_draft_v1';
+const PROJECT_IDX_KEY = 'glasfaser_last_project_idx';
+const APP_VERSION = 'v1.1.2';
 
 export default function App() {
   // --- Global State ---
@@ -87,6 +89,7 @@ export default function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [status, setStatus] = useState<FormStatus>({ step: 'login' });
   const [uploadMessage, setUploadMessage] = useState("Daten werden hochgeladen...");
+  const [draftRestored, setDraftRestored] = useState(false);
 
   // Settings Temp State
   const [newTechName, setNewTechName] = useState('');
@@ -156,6 +159,55 @@ export default function App() {
     setConfig(loadedConfig);
 
   }, []);
+
+  // Effect: Auto-Save Draft
+  useEffect(() => {
+    if (status.step === 'form' && currentUser) {
+        // Exclude images and sensitive/derived data from draft
+        const { images, technician, ...draftData } = entry;
+        
+        // Save only if there's actual content (location or description) to avoid saving empty state over good draft
+        // or if it's a deliberate clear (length check handled manually)
+        
+        const payload = JSON.stringify({
+            ...draftData,
+            projectIndex: selectedProjectIndex
+        });
+        localStorage.setItem(DRAFT_KEY, payload);
+    }
+  }, [entry, selectedProjectIndex, status.step, currentUser]);
+
+  // Effect: Restore Draft (Once when entering form)
+  useEffect(() => {
+    if (status.step === 'form' && currentUser) {
+        const savedDraft = localStorage.getItem(DRAFT_KEY);
+        if (savedDraft) {
+            try {
+                const parsed = JSON.parse(savedDraft);
+                const { projectIndex, ...restEntry } = parsed;
+                
+                // Only restore if it looks valid
+                if (restEntry.date) {
+                    setEntry(prev => ({
+                        ...prev,
+                        ...restEntry,
+                        technician: currentUser.name, // Force current user
+                        images: [] // Images cannot be restored from local storage
+                    }));
+                    if (projectIndex >= 0) {
+                        setSelectedProjectIndex(projectIndex);
+                    }
+                    setDraftRestored(true);
+                    // Hide toast after 3s
+                    setTimeout(() => setDraftRestored(false), 3000);
+                }
+            } catch (e) {
+                console.error("Failed to restore draft", e);
+            }
+        }
+    }
+  }, [status.step, currentUser]);
+
 
   // --- Helpers ---
   const extractToken = (url: string) => {
@@ -403,6 +455,9 @@ export default function App() {
       setUploadMessage(`Lade hoch zu: ${project.name}...`);
       await nextcloudService.uploadDiaryEntry(project, entry, pdfBlob);
       
+      // Clear draft on success
+      localStorage.removeItem(DRAFT_KEY);
+      
       setStatus({ step: 'success' });
     } catch (error: any) {
       setStatus({ step: 'form', message: `Upload fehlgeschlagen: ${error.message}` });
@@ -410,6 +465,7 @@ export default function App() {
   };
 
   const resetForm = () => {
+    localStorage.removeItem(DRAFT_KEY);
     setEntry({
       date: new Date().toISOString().split('T')[0],
       location: '',
@@ -422,6 +478,19 @@ export default function App() {
       images: []
     });
     setStatus({ step: 'form' });
+  };
+
+  const reuseData = () => {
+      localStorage.removeItem(DRAFT_KEY); // Clear old draft
+      // Keep location, weather, activity, project. Reset images, description, missing, materials
+      setEntry(prev => ({
+          ...prev,
+          description: '',
+          missingWork: '',
+          materials: [], // Materials usually differ per house
+          images: []
+      }));
+      setStatus({ step: 'form' });
   };
 
   // --- Views ---
@@ -449,7 +518,15 @@ export default function App() {
           </div>
           <h2 className="text-2xl font-bold text-brand-900 mb-2">Erfolgreich gespeichert!</h2>
           <p className="text-gray-600 mb-8">Der Bericht und die Fotos wurden erfolgreich in die Cloud übertragen.</p>
-          <Button onClick={resetForm} className="w-full">Neuen Eintrag erstellen</Button>
+          
+          <div className="space-y-3">
+             <Button onClick={reuseData} variant="secondary" className="w-full">
+                Gleicher Ort / Weiterer Eintrag
+             </Button>
+             <Button onClick={resetForm} className="w-full">
+                Komplett Neuer Eintrag
+             </Button>
+          </div>
         </div>
       </div>
     );
@@ -459,6 +536,13 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 pb-20 relative font-sans">
       
+      {/* Draft Restored Toast */}
+      {draftRestored && (
+          <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-full text-sm shadow-lg z-50 animate-bounce">
+              Entwurf wiederhergestellt
+          </div>
+      )}
+
       {/* Header */}
       <div className="sticky top-0 z-20 bg-white shadow-md border-b border-brand-100 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center flex-1">
