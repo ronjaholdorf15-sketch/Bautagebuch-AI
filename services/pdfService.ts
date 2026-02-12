@@ -19,171 +19,184 @@ export const generateDiaryPdf = async (
 ): Promise<Blob> => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 20;
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 15;
+  const contentWidth = pageWidth - (margin * 2);
   let yPos = 20;
 
-  // --- Header ---
-  // IT-KOM Brand Dark Blue: #1B3E78
-  // We use a white background for header with Logo on right and Title on left in Blue.
-  
-  // Title
-  doc.setTextColor(27, 62, 120); // Brand Blue
-  doc.setFontSize(22);
-  doc.setFont("helvetica", "bold");
-  doc.text("Bautagebuch", margin, 30);
-  
-  doc.setFontSize(14);
-  doc.text("IT-KOM Kommunikationstechnik GmbH", margin, 38);
-  
-  doc.setFontSize(10);
-  doc.setTextColor(100, 100, 100);
-  doc.setFont("helvetica", "normal");
-  doc.text(`Generiert am: ${new Date().toLocaleString()}`, margin, 45);
+  // Colors
+  const brandBlue = [27, 62, 120]; // #1B3E78
+  const lightGray = [245, 245, 245];
+  const borderGray = [200, 200, 200];
+  const textDark = [30, 30, 30];
 
-  // Logo (Top Right)
-  if (companyLogo) {
-      try {
-        const logoProps = doc.getImageProperties(companyLogo);
-        // Fixed standard width of 50 units for the PDF
-        const logoWidth = 50; 
-        const logoHeight = (logoProps.height * logoWidth) / logoProps.width;
-        
-        // Add image (auto-detect format from base64 data)
-        doc.addImage(companyLogo, pageWidth - margin - logoWidth, 15, logoWidth, logoHeight);
-      } catch (e) {
-          console.error("Failed to add logo to PDF", e);
-      }
-  }
-
-  yPos = 65;
-  doc.setTextColor(0, 0, 0);
-
-  // --- Project Info Table ---
-  const drawRow = (label: string, value: string) => {
-    doc.setFont("helvetica", "bold");
-    doc.text(label, margin, yPos);
-    doc.setFont("helvetica", "normal");
-    doc.text(value, margin + 50, yPos);
-    yPos += 7;
+  // --- Helper: Footer ---
+  const addFooter = (pageNum: number) => {
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text(`Seite ${pageNum}`, pageWidth / 2, pageHeight - 10, { align: "center" });
+    doc.text(`Erstellt mit IT-KOM Bautagebuch-System | ${new Date().toLocaleString('de-DE')}`, margin, pageHeight - 10);
   };
 
-  doc.setFontSize(11);
-  drawRow("Projekt:", projectName);
-  drawRow("Datum:", entry.date);
-  drawRow("Techniker:", entry.technician);
-  drawRow("Adresse der Baustelle:", entry.location); // Updated Label
-  drawRow("Wetter:", entry.weather);
-  drawRow("Tätigkeit:", entry.activityType);
+  // --- Header Section ---
+  if (companyLogo) {
+    try {
+      const logoProps = doc.getImageProperties(companyLogo);
+      const logoWidth = 55;
+      const logoHeight = (logoProps.height * logoWidth) / logoProps.width;
+      doc.addImage(companyLogo, pageWidth - margin - logoWidth, 15, logoWidth, logoHeight);
+    } catch (e) { console.error("Logo failed", e); }
+  }
+
+  doc.setTextColor(brandBlue[0], brandBlue[1], brandBlue[2]);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(24);
+  doc.text("BAUTAGEBUCH", margin, 25);
+  
+  doc.setFontSize(10);
+  doc.text("IT-KOM Kommunikationstechnik GmbH", margin, 32);
+  
+  yPos = 45;
+  doc.setDrawColor(brandBlue[0], brandBlue[1], brandBlue[2]);
+  doc.setLineWidth(0.8);
+  doc.line(margin, yPos, pageWidth - margin, yPos);
+  
+  yPos += 10;
+
+  // --- Information Grid (Table) ---
+  const drawInfoRow = (label: string, value: string, y: number) => {
+    doc.setFillColor(252, 252, 252);
+    doc.rect(margin, y - 5, contentWidth, 8, 'F');
+    doc.setDrawColor(240, 240, 240);
+    doc.line(margin, y + 3, pageWidth - margin, y + 3);
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    doc.text(label, margin + 2, y);
+    
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+    doc.text(value || "-", margin + 55, y);
+    return y + 8;
+  };
+
+  yPos = drawInfoRow("PROJEKT / BAUVORHABEN:", projectName, yPos);
+  yPos = drawInfoRow("DATUM:", entry.date, yPos);
+  yPos = drawInfoRow("STANDORT / ADRESSE:", entry.location, yPos);
+  yPos = drawInfoRow("TECHNIKER:", entry.technician, yPos);
+  yPos = drawInfoRow("WETTERLAGE:", entry.weather, yPos);
+  yPos = drawInfoRow("HAUPTTÄTIGKEIT:", entry.activityType, yPos);
 
   yPos += 10;
 
-  // --- Section: Was wurde erledigt ---
-  const addSectionHeader = (title: string, color: [number, number, number] = [27, 62, 120]) => {
-      doc.setDrawColor(color[0], color[1], color[2]);
-      doc.setLineWidth(0.5);
-      doc.line(margin, yPos, pageWidth - margin, yPos);
-      yPos += 8;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(14);
-      doc.setTextColor(color[0], color[1], color[2]);
-      doc.text(title, margin, yPos);
-      doc.setTextColor(0, 0, 0);
-      yPos += 8;
+  // --- Section: Beschreibung ---
+  const drawSectionHeader = (title: string, color = brandBlue) => {
+    doc.setFillColor(color[0], color[1], color[2]);
+    doc.rect(margin, yPos, contentWidth, 7, 'F');
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(255, 255, 255);
+    doc.text(title.toUpperCase(), margin + 2, yPos + 5);
+    yPos += 10;
   };
 
-  addSectionHeader("Was wurde erledigt");
+  drawSectionHeader("Erledigte Arbeiten / Dokumentation");
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
+  doc.setFontSize(10);
+  doc.setTextColor(textDark[0], textDark[1], textDark[2]);
   
-  const splitDescription = doc.splitTextToSize(entry.description, pageWidth - (margin * 2));
-  doc.text(splitDescription, margin, yPos);
-  yPos += (splitDescription.length * 5) + 5;
+  const splitDesc = doc.splitTextToSize(entry.description, contentWidth - 4);
+  const descHeight = (splitDesc.length * 5) + 5;
+  
+  // Background Box for text
+  doc.setDrawColor(borderGray[0], borderGray[1], borderGray[2]);
+  doc.setLineWidth(0.1);
+  doc.rect(margin, yPos - 3, contentWidth, descHeight);
+  doc.text(splitDesc, margin + 2, yPos + 2);
+  
+  yPos += descHeight + 10;
 
-  // --- Section: Was fehlt noch ---
-  if (entry.missingWork && entry.missingWork.trim() !== "") {
-      if (yPos > 240) { doc.addPage(); yPos = 20; } // Page break check
-      addSectionHeader("Was fehlt noch / Offene Punkte", [200, 100, 0]); // Orange/Brownish hint
-      const splitMissing = doc.splitTextToSize(entry.missingWork, pageWidth - (margin * 2));
-      doc.text(splitMissing, margin, yPos);
-      yPos += (splitMissing.length * 5) + 5;
+  // --- Section: Material ---
+  if (entry.materials.length > 0) {
+    if (yPos > 240) { doc.addPage(); yPos = 20; addFooter(doc.internal.pages.length - 1); }
+    drawSectionHeader("Eingesetztes Material");
+    
+    // Table Header
+    doc.setFillColor(240, 240, 240);
+    doc.rect(margin, yPos - 3, contentWidth, 7, 'F');
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(100, 100, 100);
+    doc.text("MATERIALBEZEICHNUNG", margin + 2, yPos + 2);
+    doc.text("MENGE", pageWidth - margin - 30, yPos + 2, { align: "right" });
+    yPos += 7;
+
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+    
+    entry.materials.forEach((m, i) => {
+        if (yPos > 270) { doc.addPage(); yPos = 20; addFooter(doc.internal.pages.length - 1); }
+        if (i % 2 === 0) doc.setFillColor(252, 252, 252); else doc.setFillColor(255, 255, 255);
+        doc.rect(margin, yPos - 3, contentWidth, 7, 'F');
+        doc.text(m.name, margin + 2, yPos + 2);
+        doc.text(m.amount, pageWidth - margin - 30, yPos + 2, { align: "right" });
+        yPos += 7;
+    });
+    yPos += 5;
   }
 
-  // --- Section: Materialliste ---
-  if (entry.materials && entry.materials.length > 0) {
-      if (yPos > 240) { doc.addPage(); yPos = 20; } // Page break check
-      addSectionHeader("Materialliste");
-      
-      // Table Header
-      doc.setFillColor(245, 245, 245);
-      doc.rect(margin, yPos - 5, pageWidth - (margin * 2), 8, 'F');
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.text("Material", margin + 2, yPos);
-      doc.text("Menge", pageWidth - margin - 40, yPos);
-      yPos += 8;
-
-      // Items
-      doc.setFont("helvetica", "normal");
-      entry.materials.forEach((item, index) => {
-          if (yPos > 280) { doc.addPage(); yPos = 20; }
-          
-          doc.text(item.name, margin + 2, yPos);
-          doc.text(item.amount, pageWidth - margin - 40, yPos);
-          
-          // Gray line below item
-          doc.setDrawColor(220, 220, 220);
-          doc.line(margin, yPos + 2, pageWidth - margin, yPos + 2);
-          
-          yPos += 7;
-      });
-      yPos += 5;
-  }
-
-  // --- Section: Images ---
+  // --- Section: Fotos ---
   if (entry.images.length > 0) {
     doc.addPage();
-    yPos = 20;
+    let pageNum = doc.internal.pages.length - 1;
+    addFooter(pageNum);
+    yPos = 25;
     
-    addSectionHeader("Fotodokumentation");
+    doc.setFillColor(brandBlue[0], brandBlue[1], brandBlue[2]);
+    doc.rect(margin, yPos, contentWidth, 8, 'F');
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(255, 255, 255);
+    doc.text("FOTODOKUMENTATION", margin + 2, yPos + 5.5);
+    yPos += 15;
+
+    const imgWidth = (contentWidth - 10) / 2;
+    const imgHeight = 70;
+    let col = 0;
 
     for (let i = 0; i < entry.images.length; i++) {
-      const file = entry.images[i];
-      try {
-        const base64Img = await fileToBase64(file);
-        const imgProps = doc.getImageProperties(base64Img);
-        
-        // Calculate dimensions to fit page width (minus margins) or max height
-        const maxWidth = pageWidth - (margin * 2);
-        const maxHeight = 110; // Allow 2 images per page roughly
-        
-        let imgWidth = maxWidth;
-        let imgHeight = (imgProps.height * maxWidth) / imgProps.width;
-
-        if (imgHeight > maxHeight) {
-            imgHeight = maxHeight;
-            imgWidth = (imgProps.width * maxHeight) / imgProps.height;
-        }
-
-        // Check if new page is needed
-        if (yPos + imgHeight > 280) {
+        if (yPos + imgHeight > 270) {
             doc.addPage();
+            pageNum = doc.internal.pages.length - 1;
+            addFooter(pageNum);
             yPos = 20;
+            col = 0;
         }
 
-        doc.addImage(base64Img, 'JPEG', margin, yPos, imgWidth, imgHeight);
-        
-        yPos += imgHeight + 5;
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "italic");
-        doc.setTextColor(100, 100, 100);
-        doc.text(`Bild ${i + 1}: ${file.name}`, margin, yPos);
-        yPos += 15;
+        try {
+            const base64Img = await fileToBase64(entry.images[i]);
+            const x = margin + (col * (imgWidth + 10));
+            
+            // Image Frame
+            doc.setDrawColor(borderGray[0], borderGray[1], borderGray[2]);
+            doc.rect(x - 0.5, yPos - 0.5, imgWidth + 1, imgHeight + 1);
+            doc.addImage(base64Img, 'JPEG', x, yPos, imgWidth, imgHeight);
+            
+            doc.setFontSize(7);
+            doc.setTextColor(120, 120, 120);
+            doc.text(`Bild ${i+1}: ${entry.images[i].name.substring(0, 35)}`, x, yPos + imgHeight + 4);
 
-      } catch (e) {
-        console.error(`Could not add image ${file.name} to PDF`, e);
-      }
+            if (col === 1) {
+                yPos += imgHeight + 15;
+                col = 0;
+            } else {
+                col = 1;
+            }
+        } catch (e) { console.error("Image add failed", e); }
     }
   }
+
+  // Final Footer for Page 1
+  addFooter(1);
 
   return doc.output('blob');
 };
