@@ -1,30 +1,5 @@
+
 import { GoogleGenAI } from "@google/genai";
-
-// Lazy initialization holder
-let aiClient: GoogleGenAI | null = null;
-
-// Helper to get or create the client only when needed (Lazy Loading)
-const getAiClient = () => {
-  if (!aiClient) {
-    const apiKey = process.env.API_KEY || '';
-    
-    // Safety check: Don't crash if key is missing, just warn
-    if (!apiKey) {
-      console.warn("API Key fehlt! KI-Funktionen werden deaktiviert.");
-      // We do NOT return here, we let it fail gracefully later or create a dummy client if possible,
-      // but creating with empty string might throw in some versions.
-    }
-
-    try {
-        aiClient = new GoogleGenAI({ apiKey });
-    } catch (e) {
-        console.error("Fehler beim Initialisieren des Google Clients:", e);
-        // Do not re-throw, just leave aiClient null or let it fail on usage
-        return null;
-    }
-  }
-  return aiClient;
-};
 
 // Helper: Convert File to Base64 for Gemini
 const fileToGenerativePart = async (file: File) => {
@@ -47,15 +22,11 @@ const fileToGenerativePart = async (file: File) => {
   };
 };
 
+// Fix: Use new GoogleGenAI instance with process.env.API_KEY directly and use recommended model 'gemini-3-flash-preview'
 export const enhanceDiaryEntry = async (text: string, activity: string): Promise<string> => {
-  if (!process.env.API_KEY) {
-    return text; // Silent fail if no key
-  }
-
   try {
-    const client = getAiClient();
-    if (!client) throw new Error("Client initialization failed");
-
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
     const prompt = `
       Du bist ein professioneller Bauleiter für Glasfaserausbau.
       Formuliere die folgenden Notizen eines Technikers in einen professionellen, sachlichen Bautagebuch-Eintrag um.
@@ -67,11 +38,12 @@ export const enhanceDiaryEntry = async (text: string, activity: string): Promise
       Antworte nur mit dem verbesserten Text, ohne Einleitung oder Formatierung.
     `;
 
-    const response = await client.models.generateContent({
-      model: 'gemini-2.5-flash',
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
       contents: prompt,
     });
 
+    // Fix: Access .text property directly
     return response.text || text;
   } catch (error) {
     console.error("Gemini enhancement failed", error);
@@ -79,14 +51,12 @@ export const enhanceDiaryEntry = async (text: string, activity: string): Promise
   }
 };
 
+// Fix: Use new GoogleGenAI instance with process.env.API_KEY directly and use recommended model 'gemini-3-flash-preview'
 export const analyzeImagesForReport = async (images: File[], activity: string): Promise<string> => {
     if (images.length === 0) return "";
-    if (!process.env.API_KEY) throw new Error("API Key fehlt. Bitte in Vercel konfigurieren.");
 
     try {
-        const client = getAiClient();
-        if (!client) throw new Error("Client initialization failed");
-
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const imageParts = await Promise.all(images.map(fileToGenerativePart));
         
         const prompt = `
@@ -100,8 +70,8 @@ export const analyzeImagesForReport = async (images: File[], activity: string): 
             Fasse dich kurz und präzise. Keine Einleitung ("Auf den Bildern sieht man..."), sondern direkt: "Graben erstellt, Leerrohr DN50 verlegt...".
         `;
 
-        const response = await client.models.generateContent({
-            model: 'gemini-2.5-flash', 
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview', 
             contents: {
                 parts: [
                     { text: prompt },
@@ -110,6 +80,7 @@ export const analyzeImagesForReport = async (images: File[], activity: string): 
             }
         });
 
+        // Fix: Access .text property directly
         return response.text || "";
     } catch (error) {
         console.error("Gemini vision analysis failed", error);
@@ -117,13 +88,12 @@ export const analyzeImagesForReport = async (images: File[], activity: string): 
     }
 };
 
+// Fix: Use new GoogleGenAI instance with process.env.API_KEY directly and use recommended model 'gemini-3-flash-preview'
 export const suggestMissingWork = async (doneDescription: string, activity: string): Promise<string> => {
     if (!doneDescription) return "";
-    if (!process.env.API_KEY) return "";
 
     try {
-        const client = getAiClient();
-        if (!client) throw new Error("Client initialization failed");
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
         const prompt = `
             Basierend auf diesem Bautagebuch-Eintrag (Erledigt): "${doneDescription}"
@@ -135,11 +105,12 @@ export const suggestMissingWork = async (doneDescription: string, activity: stri
             Liste 2-3 Punkte stichpunktartig auf.
         `;
 
-        const response = await client.models.generateContent({
-            model: 'gemini-2.5-flash',
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
             contents: prompt,
         });
 
+        // Fix: Access .text property directly
         return response.text || "";
     } catch (error) {
         console.error("Gemini suggestions failed", error);
