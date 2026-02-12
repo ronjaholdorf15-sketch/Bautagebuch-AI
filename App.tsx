@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AppConfig, Technician, PublicProject, FormStatus, DiaryEntry, WeatherCondition, MaterialItem } from './types';
 import * as nextcloudService from './services/nextcloudService';
 import * as geminiService from './services/geminiService';
@@ -70,6 +70,12 @@ const PlusIcon = () => (
     </svg>
 );
 
+const BackupIcon = () => (
+    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+    </svg>
+);
+
 const STORAGE_KEY = 'glasfaser_app_config_v2';
 const DRAFT_KEY = 'glasfaser_entry_draft_v1';
 
@@ -79,12 +85,11 @@ export default function App() {
   const [loginCode, setLoginCode] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [showSettings, setShowSettings] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
   const [status, setStatus] = useState<FormStatus>({ step: 'login' });
   const [uploadMessage, setUploadMessage] = useState("");
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [draftRestored, setDraftRestored] = useState(false);
   const [lastGeneratedPdf, setLastGeneratedPdf] = useState<Blob | null>(null);
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   // Management States
   const [newProjName, setNewProjName] = useState('');
@@ -119,14 +124,15 @@ export default function App() {
   const [isAnalyzingImages, setIsAnalyzingImages] = useState(false);
   const [isGeneratingPdfOnly, setIsGeneratingPdfOnly] = useState(false);
 
+  // Load configuration on mount
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     let loadedConfig: AppConfig = { technicians: [], projects: [] };
     if (stored) {
-      try { loadedConfig = JSON.parse(stored); } catch (e) {}
+      try { loadedConfig = JSON.parse(stored); } catch (e) { console.error("Config parse failed", e); }
     }
     
-    // Initial-Admin sicherstellen falls Liste leer
+    // Ensure at least one admin exists if config is truly empty
     if (loadedConfig.technicians.length === 0) {
         loadedConfig.technicians.push({ 
             id: 'admin-init', 
@@ -140,7 +146,7 @@ export default function App() {
     setConfig(loadedConfig);
   }, []);
 
-  // Entwurfs-Logik
+  // Autosave Draft
   useEffect(() => {
     if (status.step === 'form' && currentUser) {
         const { images, technician, ...draftData } = entry;
@@ -151,6 +157,40 @@ export default function App() {
   const saveConfig = (newConfig: AppConfig) => {
     setConfig(newConfig);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
+  };
+
+  const handleExportConfig = () => {
+    const dataStr = JSON.stringify(config, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `it_kom_bautagebuch_config_backup_${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportConfig = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        try {
+            const imported = JSON.parse(event.target?.result as string);
+            if (imported.technicians && Array.from(imported.technicians).length > 0) {
+                if (confirm("Möchten Sie die aktuelle Konfiguration wirklich mit diesem Backup überschreiben?")) {
+                    saveConfig(imported);
+                    alert("Konfiguration erfolgreich importiert.");
+                    window.location.reload(); // Reload to ensure all states are clean
+                }
+            } else {
+                alert("Ungültige Backup-Datei.");
+            }
+        } catch (err) {
+            alert("Fehler beim Lesen der Backup-Datei.");
+        }
+    };
+    reader.readAsText(file);
   };
 
   const handleLogin = (e: React.FormEvent) => {
@@ -450,24 +490,43 @@ export default function App() {
             <div className="bg-white rounded-2xl p-6 w-full max-w-6xl max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div className="flex justify-between items-center mb-6 border-b pb-4">
                     <h3 className="text-2xl font-bold text-brand-900">Administration</h3>
-                    <button onClick={() => { setShowSettings(false); setEditingTechId(null); }} className="p-2 text-gray-500 hover:text-gray-800"><CloseIcon /></button>
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] bg-green-100 text-green-700 px-2 py-1 rounded-full font-bold uppercase tracking-widest">Permanent gesichert</span>
+                        <button onClick={() => { setShowSettings(false); setEditingTechId(null); }} className="p-2 text-gray-500 hover:text-gray-800"><CloseIcon /></button>
+                    </div>
                 </div>
                 
                 <div className="grid lg:grid-cols-3 gap-8">
-                    {/* Firmenlogo */}
-                    <div className="space-y-4">
-                        <h4 className="text-xs font-bold uppercase text-brand-600">Logo & Design</h4>
-                        <div className="bg-gray-50 p-6 rounded-xl border text-center">
-                            <div className="flex justify-center mb-6 bg-white p-4 rounded-lg border border-dashed items-center min-h-[120px]">
-                                <Logo className="h-20 w-auto" src={config.logo} />
+                    {/* Firmenlogo & Backup */}
+                    <div className="space-y-6">
+                        <div className="space-y-4">
+                            <h4 className="text-xs font-bold uppercase text-brand-600">Logo & Design</h4>
+                            <div className="bg-gray-50 p-6 rounded-xl border text-center">
+                                <div className="flex justify-center mb-6 bg-white p-4 rounded-lg border border-dashed items-center min-h-[120px]">
+                                    <Logo className="h-20 w-auto" src={config.logo} />
+                                </div>
+                                <label className="block w-full py-2 px-4 bg-brand-600 text-white rounded-lg cursor-pointer hover:bg-brand-700 text-sm font-bold mb-2">
+                                    Neues Logo hochladen
+                                    <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                                </label>
+                                {config.logo && (
+                                    <button onClick={() => saveConfig({ ...config, logo: undefined })} className="text-[10px] text-red-500 font-bold uppercase tracking-wider">Logo zurücksetzen</button>
+                                )}
                             </div>
-                            <label className="block w-full py-2 px-4 bg-brand-600 text-white rounded-lg cursor-pointer hover:bg-brand-700 text-sm font-bold mb-2">
-                                Neues Logo hochladen
-                                <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
-                            </label>
-                            {config.logo && (
-                                <button onClick={() => saveConfig({ ...config, logo: undefined })} className="text-[10px] text-red-500 font-bold uppercase tracking-wider">Logo zurücksetzen</button>
-                            )}
+                        </div>
+
+                        <div className="space-y-4 border-t pt-4">
+                            <h4 className="text-xs font-bold uppercase text-brand-600">Backup & Sicherheit</h4>
+                            <div className="bg-slate-100 p-4 rounded-xl border space-y-3">
+                                <p className="text-[11px] text-gray-500 leading-relaxed">Sichern Sie Ihre Konfiguration regelmäßig, um Datenverlust bei Browser-Wechsel zu vermeiden.</p>
+                                <Button onClick={handleExportConfig} variant="outline" className="w-full text-xs py-2">
+                                    <BackupIcon /> Konfiguration exportieren
+                                </Button>
+                                <label className="block w-full py-2 px-4 bg-white border border-gray-300 text-gray-700 rounded-md cursor-pointer hover:bg-gray-50 text-center text-xs font-medium">
+                                    Backup importieren
+                                    <input type="file" ref={importFileRef} accept=".json" onChange={handleImportConfig} className="hidden" />
+                                </label>
+                            </div>
                         </div>
                     </div>
 
@@ -475,10 +534,11 @@ export default function App() {
                     <div className="space-y-4">
                         <h4 className="text-xs font-bold uppercase text-brand-600">Projekte (Nextcloud)</h4>
                         <div className="space-y-2 mb-4 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
+                            {config.projects.length === 0 && <p className="text-xs text-gray-400 text-center py-4">Keine Projekte angelegt.</p>}
                             {config.projects.map(p => (
                                 <div key={p.token} className="flex justify-between items-center p-2 bg-white rounded border text-sm shadow-sm">
                                     <span className="font-medium truncate">{p.name}</span>
-                                    <button onClick={() => saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)})} className="text-red-400"><TrashIcon /></button>
+                                    <button onClick={() => { if(confirm("Projekt löschen?")) saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)}) }} className="text-red-400"><TrashIcon /></button>
                                 </div>
                             ))}
                         </div>
@@ -490,7 +550,7 @@ export default function App() {
                                 if (!token || !newProjName) return alert("Ungültige Daten.");
                                 saveConfig({...config, projects: [...config.projects, { name: newProjName, link: newProjLink, token }]});
                                 setNewProjName(''); setNewProjLink('');
-                            }} className="w-full">Hinzufügen</Button>
+                            }} className="w-full">Projekt hinzufügen</Button>
                         </div>
                     </div>
 
@@ -527,7 +587,7 @@ export default function App() {
                                             <div className="flex gap-1">
                                                 <button onClick={() => startEditingTech(t)} className="p-1 text-brand-400 hover:text-brand-600"><EditIcon /></button>
                                                 {t.id !== currentUser?.id && (
-                                                    <button onClick={() => saveConfig({...config, technicians: config.technicians.filter(tech => tech.id !== t.id)})} className="p-1 text-red-300 hover:text-red-500"><TrashIcon /></button>
+                                                    <button onClick={() => { if(confirm("Nutzer löschen?")) saveConfig({...config, technicians: config.technicians.filter(tech => tech.id !== t.id)}) }} className="p-1 text-red-300 hover:text-red-500"><TrashIcon /></button>
                                                 )}
                                             </div>
                                         </div>
@@ -536,7 +596,7 @@ export default function App() {
                             ))}
                         </div>
                         <div className="bg-gray-100 p-3 rounded-lg border">
-                            <h5 className="text-[10px] font-bold text-gray-500 uppercase mb-2">Neu anlegen</h5>
+                            <h5 className="text-[10px] font-bold text-gray-500 uppercase mb-2">Techniker neu anlegen</h5>
                             <input placeholder="Name" value={newTechName} onChange={e => setNewTechName(e.target.value)} className="w-full p-2 border rounded text-xs mb-2 shadow-inner" />
                             <div className="grid grid-cols-2 gap-2 mb-2">
                                 <input placeholder="Kürzel" value={newTechCode} onChange={e => setNewTechCode(e.target.value)} className="w-full p-2 border rounded text-xs uppercase" />
@@ -556,7 +616,7 @@ export default function App() {
                 </div>
                 
                 <div className="pt-6 mt-8 border-t flex justify-between items-center">
-                    <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Verwaltungskonsole v1.2.5</p>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Verwaltungskonsole v1.2.6</p>
                     <Button variant="outline" onClick={() => { setShowSettings(false); setEditingTechId(null); }}>Schließen</Button>
                 </div>
             </div>
