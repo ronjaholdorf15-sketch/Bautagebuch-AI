@@ -16,6 +16,7 @@ export interface Technician {
 export interface AppConfig {
   technicians: Technician[];
   projects: PublicProject[];
+  logo?: string; // Base64 encoded custom logo
 }
 
 export interface MaterialItem {

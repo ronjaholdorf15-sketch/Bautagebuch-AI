@@ -225,7 +225,7 @@ export default function App() {
       setIsGeneratingPdfOnly(true);
       try {
           const project = config.projects[selectedProjectIndex] || { name: 'Entwurf' };
-          const logoBase64 = await getLogoAsBase64();
+          const logoBase64 = await getLogoAsBase64(config.logo);
           const pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
           const filename = `Bautagebuch_${entry.date}_${entry.location.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
           downloadBlob(pdfBlob, filename);
@@ -255,6 +255,16 @@ export default function App() {
     setEditingTechId(null);
   };
 
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+        saveConfig({ ...config, logo: reader.result as string });
+    };
+    reader.readAsDataURL(file);
+  };
+
   const addMaterial = () => {
     if (!materialInput.name || !materialInput.amount) return;
     setEntry(prev => ({ ...prev, materials: [...prev.materials, { ...materialInput }] }));
@@ -279,7 +289,7 @@ export default function App() {
     try {
       setStatus({ step: 'uploading' });
       setUploadMessage("Generiere PDF-Bericht...");
-      const logoBase64 = await getLogoAsBase64();
+      const logoBase64 = await getLogoAsBase64(config.logo);
       const pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
       setLastGeneratedPdf(pdfBlob); 
       
@@ -290,7 +300,6 @@ export default function App() {
     } catch (error: any) {
       console.error("Upload Error:", error);
       setUploadError(error.message || "Unbekannter Netzwerkfehler");
-      // Wir bleiben im State 'uploading', aber zeigen den Fehler an.
     }
   };
 
@@ -358,25 +367,25 @@ export default function App() {
       {draftRestored && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-full text-sm shadow-lg z-50 animate-bounce">Entwurf wiederhergestellt</div>}
 
       <div className="sticky top-0 z-20 bg-white shadow-md border-b border-brand-100 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center flex-1">
-             <Logo className="h-10 md:h-14 w-auto" />
-             <span className="ml-4 font-bold text-brand-900 hidden lg:block text-xl border-l-2 border-brand-200 pl-4">Bautagebuch</span>
+        <div className="flex items-center flex-1 overflow-hidden mr-4">
+             <Logo className="h-10 md:h-14 w-auto shrink-0" src={config.logo} />
+             <span className="ml-4 font-bold text-brand-900 hidden lg:block text-xl border-l-2 border-brand-200 pl-4 truncate">Bautagebuch</span>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
             {currentUser?.role === 'admin' && <button onClick={() => setShowSettings(true)} className="p-2 text-brand-600 hover:bg-brand-50 rounded-full transition-colors"><SettingsIcon /></button>}
             {currentUser && <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-600 rounded-full transition-colors"><LogoutIcon /></button>}
         </div>
       </div>
 
       {!currentUser ? (
-          <div className="max-w-md mx-auto mt-16 p-6">
-              <div className="bg-white rounded-2xl shadow-xl p-8 text-center border-t-4 border-brand-600">
-                  <Logo className="h-20 mx-auto mb-8" />
-                  <h2 className="text-xl font-bold text-brand-900 mb-6">Techniker Anmeldung</h2>
+          <div className="max-w-md mx-auto mt-16 p-6 text-center">
+              <Logo className="h-24 md:h-32 mx-auto mb-10 drop-shadow-sm" src={config.logo} />
+              <div className="bg-white rounded-2xl shadow-xl p-8 border-t-4 border-brand-600">
+                  <h2 className="text-xl font-bold text-brand-900 mb-6 uppercase tracking-tight">Anmeldung</h2>
                   <form onSubmit={handleLogin} className="space-y-4">
-                      <input type="text" value={loginCode} onChange={e => setLoginCode(e.target.value)} placeholder="Kürzel (z.B. RH)" className="w-full text-center text-xl p-3 border rounded-lg uppercase outline-none focus:ring-2 focus:ring-brand-200 transition-all" />
+                      <input type="text" value={loginCode} onChange={e => setLoginCode(e.target.value)} placeholder="Kürzel" className="w-full text-center text-xl p-3 border rounded-lg uppercase outline-none focus:ring-2 focus:ring-brand-200 transition-all" />
                       <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="Passwort" className="w-full text-center text-xl p-3 border rounded-lg outline-none focus:ring-2 focus:ring-brand-200 transition-all" />
-                      <Button type="submit" className="w-full py-3 text-lg font-bold">Anmelden</Button>
+                      <Button type="submit" className="w-full py-4 text-lg font-bold">Anmelden</Button>
                   </form>
               </div>
           </div>
@@ -389,7 +398,7 @@ export default function App() {
                         <p className="text-gray-500 text-sm">Techniker: {currentUser.name}</p>
                     </div>
                     <button type="button" onClick={handleManualPdfDownload} disabled={isGeneratingPdfOnly} className="text-brand-600 hover:bg-brand-50 px-3 py-1.5 rounded-lg border border-brand-200 text-xs font-bold flex items-center transition-colors">
-                        {isGeneratingPdfOnly ? "Generiert..." : <><DownloadIcon /> Vorschau / PDF</>}
+                        {isGeneratingPdfOnly ? "Generiert..." : <><DownloadIcon /> PDF / Vorschau</>}
                     </button>
                 </div>
 
@@ -486,7 +495,7 @@ export default function App() {
 
                 <div className="pt-6 border-t flex flex-col gap-3">
                     <Button type="submit" className="w-full py-4 text-xl font-bold shadow-xl">Bericht Absenden</Button>
-                    <p className="text-[10px] text-center text-gray-400 italic">Der Bericht wird als PDF in der Nextcloud des gewählten Projekts abgelegt.</p>
+                    <p className="text-[10px] text-center text-gray-400 italic">Bericht wird als PDF archiviert.</p>
                 </div>
             </form>
         </div>
@@ -494,73 +503,84 @@ export default function App() {
 
       {showSettings && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-6xl max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div className="flex justify-between items-center mb-6 border-b pb-4">
                     <h3 className="text-2xl font-bold text-brand-900">System-Verwaltung</h3>
                     <button onClick={() => { setShowSettings(false); setEditingTechId(null); }} className="p-2 text-gray-500 hover:text-gray-800 transition-colors"><CloseIcon /></button>
                 </div>
                 
-                <div className="grid lg:grid-cols-2 gap-10">
+                <div className="grid lg:grid-cols-3 gap-8">
+                    {/* 1. Logo Verwaltung */}
+                    <div className="space-y-4">
+                        <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Corporate Identity</h4>
+                        <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 text-center">
+                            <label className="block text-xs font-bold text-gray-500 mb-4 uppercase">Aktuelles Firmenlogo</label>
+                            <div className="flex justify-center mb-6 bg-white p-4 rounded-lg border border-dashed border-gray-300 min-h-[100px] items-center">
+                                <Logo className="h-20 w-auto" src={config.logo} />
+                            </div>
+                            <div className="space-y-3">
+                                <label className="block w-full py-2 px-4 bg-brand-600 text-white rounded-lg cursor-pointer hover:bg-brand-700 transition-all text-sm font-bold">
+                                    Logo hochladen
+                                    <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                                </label>
+                                {config.logo && (
+                                    <button onClick={() => saveConfig({ ...config, logo: undefined })} className="text-xs text-red-500 font-bold hover:underline">Logo zurücksetzen (Standard)</button>
+                                )}
+                            </div>
+                            <p className="text-[10px] text-gray-400 mt-4 leading-tight italic">Empfohlen: PNG oder SVG mit transparentem Hintergrund.</p>
+                        </div>
+                    </div>
+
+                    {/* 2. Projekte Verwaltung */}
                     <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                             <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Projekte (Nextcloud)</h4>
+                             <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Projekte</h4>
                              <button onClick={() => setShowHelp(!showHelp)} className="text-brand-500 hover:text-brand-700 flex items-center gap-1 text-xs font-bold bg-brand-50 px-2 py-1 rounded-full transition-colors">
-                                <InfoIcon /> Verbindungshilfe
+                                <InfoIcon /> Hilfe
                              </button>
                         </div>
-
                         {showHelp && (
-                            <div className="mb-4 bg-blue-50 p-4 rounded-xl text-xs leading-relaxed text-blue-900 border border-blue-200 shadow-inner">
-                                <p className="font-bold mb-2">WICHTIG: IONOS Nextcloud Fix</p>
-                                <p className="mb-2">Damit der Upload funktioniert, muss diese URL in der .htaccess Ihrer Nextcloud stehen:</p>
-                                <p className="mb-2 font-mono bg-white p-1 rounded select-all text-brand-700">{currentAppDomain}</p>
-                                <pre className="bg-white p-3 rounded-lg border text-[10px] mb-3 overflow-x-auto select-all shadow-sm">
-{`<IfModule mod_headers.c>
-  SetEnvIf Origin "${currentAppDomain}" APP_ORIGIN=$0
-  Header set Access-Control-Allow-Origin %{APP_ORIGIN}e env=APP_ORIGIN
-  Header set Access-Control-Allow-Methods "GET, POST, OPTIONS, PUT, MKCOL"
-  Header set Access-Control-Allow-Headers "Authorization, Content-Type, Origin"
-</IfModule>`}
-                                </pre>
-                                <Button onClick={() => copyToClipboard(`<IfModule mod_headers.c>\n  SetEnvIf Origin "${currentAppDomain}" APP_ORIGIN=$0\n  Header set Access-Control-Allow-Origin %{APP_ORIGIN}e env=APP_ORIGIN\n  Header set Access-Control-Allow-Methods "GET, POST, OPTIONS, PUT, MKCOL"\n  Header set Access-Control-Allow-Headers "Authorization, Content-Type, Origin"\n</IfModule>`)} variant="primary" className="w-full py-1 text-[10px]">Fix-Code kopieren</Button>
+                            <div className="bg-blue-50 p-4 rounded-xl text-xs leading-relaxed text-blue-900 border border-blue-200">
+                                <p className="font-bold mb-1">IONOS Nextcloud Fix:</p>
+                                <p className="mb-2">Füge in die .htaccess deiner Nextcloud ein:</p>
+                                <code className="block bg-white p-1 rounded text-[10px] truncate mb-2">{currentAppDomain}</code>
+                                <Button onClick={() => copyToClipboard(`<IfModule mod_headers.c>\n  SetEnvIf Origin "${currentAppDomain}" APP_ORIGIN=$0\n  Header set Access-Control-Allow-Origin %{APP_ORIGIN}e env=APP_ORIGIN\n  Header set Access-Control-Allow-Methods "GET, POST, OPTIONS, PUT, MKCOL"\n  Header set Access-Control-Allow-Headers "Authorization, Content-Type, Origin"\n</IfModule>`)} variant="primary" className="w-full py-1 text-[10px]">Code kopieren</Button>
                             </div>
                         )}
-
-                        <div className="space-y-2 mb-4 max-h-48 overflow-y-auto pr-1 border rounded-lg p-3 bg-gray-50 border-gray-200">
+                        <div className="space-y-2 mb-4 max-h-48 overflow-y-auto border rounded-lg p-3 bg-gray-50">
                             {config.projects.map(p => (
                                 <div key={p.token} className="flex justify-between items-center p-3 bg-white rounded-lg border border-gray-100 text-sm shadow-sm">
                                     <span className="font-medium truncate mr-2">{p.name}</span>
-                                    <button onClick={() => saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)})} className="text-red-400 hover:text-red-600 transition-colors"><TrashIcon /></button>
+                                    <button onClick={() => saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)})} className="text-red-400 hover:text-red-600"><TrashIcon /></button>
                                 </div>
                             ))}
                         </div>
                         <div className="space-y-3 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                            <input placeholder="Projektname (z.B. Ort)" value={newProjName} onChange={e => setNewProjName(e.target.value)} className="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                            <input placeholder="Nextcloud Share-Link" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
+                            <input placeholder="Name" value={newProjName} onChange={e => setNewProjName(e.target.value)} className="w-full p-2 border rounded-lg text-sm" />
+                            <input placeholder="Link" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="w-full p-2 border rounded-lg text-sm" />
                             <Button onClick={() => {
                                 const token = newProjLink.split('/s/')[1]?.split('/')[0];
-                                if (!token || !newProjName) return alert("Pflichtfelder fehlen.");
+                                if (!token || !newProjName) return alert("Pflichtfelder!");
                                 saveConfig({...config, projects: [...config.projects, { name: newProjName, link: newProjLink, token }]});
                                 setNewProjName(''); setNewProjLink('');
-                            }} className="w-full">Hinzufügen</Button>
+                            }} className="w-full">Projekt +</Button>
                         </div>
                     </div>
 
+                    {/* 3. Techniker Verwaltung */}
                     <div className="space-y-4">
-                        <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Techniker-Konten</h4>
-                        <div className="space-y-2 mb-4 max-h-80 overflow-y-auto pr-1 border rounded-lg p-3 bg-gray-50 border-gray-200">
+                        <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Techniker</h4>
+                        <div className="space-y-2 mb-4 max-h-80 overflow-y-auto border rounded-lg p-3 bg-gray-50">
                             {config.technicians.map(t => (
-                                <div key={t.id} className={`flex flex-col p-3 bg-white rounded-lg border text-sm shadow-sm transition-all ${editingTechId === t.id ? 'border-brand-500 ring-1 ring-brand-500 bg-brand-50/30' : 'border-gray-100'}`}>
+                                <div key={t.id} className={`flex flex-col p-3 bg-white rounded-lg border text-sm shadow-sm ${editingTechId === t.id ? 'border-brand-500 bg-brand-50/20' : 'border-gray-100'}`}>
                                     {editingTechId === t.id ? (
                                         <div className="space-y-2">
-                                            <input value={editTechName} onChange={e => setEditTechName(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Name" />
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <input value={editTechCode} onChange={e => setEditTechCode(e.target.value)} className="w-full p-1 border rounded text-xs uppercase" placeholder="Kürzel" />
-                                                <input value={editTechPass} onChange={e => setEditTechPass(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Passwort" />
-                                            </div>
+                                            <input value={editTechName} onChange={e => setEditTechName(e.target.value)} className="w-full p-1 border rounded text-xs" />
+                                            <input value={editTechCode} onChange={e => setEditTechCode(e.target.value)} className="w-full p-1 border rounded text-xs uppercase" />
+                                            <input value={editTechPass} onChange={e => setEditTechPass(e.target.value)} className="w-full p-1 border rounded text-xs" />
                                             <div className="flex justify-end gap-2 pt-2">
-                                                <button onClick={() => setEditingTechId(null)} className="p-1 text-gray-400 hover:text-gray-600"><CloseIcon /></button>
-                                                <button onClick={saveEditedTech} className="p-1 text-green-500 hover:text-green-700"><CheckIcon /></button>
+                                                <button onClick={() => setEditingTechId(null)} className="p-1 text-gray-400"><CloseIcon /></button>
+                                                <button onClick={saveEditedTech} className="p-1 text-green-500"><CheckIcon /></button>
                                             </div>
                                         </div>
                                     ) : (
@@ -580,8 +600,7 @@ export default function App() {
                                 </div>
                             ))}
                         </div>
-                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                            <h5 className="text-xs font-bold text-gray-500 uppercase mb-3">Neu anlegen</h5>
+                        <div className="bg-gray-100 p-4 rounded-xl">
                             <input placeholder="Name" value={newTechName} onChange={e => setNewTechName(e.target.value)} className="w-full p-2 border rounded-lg text-sm mb-2" />
                             <div className="grid grid-cols-2 gap-2 mb-2">
                                 <input placeholder="Kürzel" value={newTechCode} onChange={e => setNewTechCode(e.target.value)} className="w-full p-2 border rounded-lg text-sm uppercase" />
@@ -591,13 +610,13 @@ export default function App() {
                                 if (!newTechName || !newTechCode) return alert("Pflichtfelder!");
                                 saveConfig({...config, technicians: [...config.technicians, { id: Date.now().toString(), name: newTechName, code: newTechCode.toUpperCase(), password: newTechPass, role: 'user' }]});
                                 setNewTechName(''); setNewTechCode(''); setNewTechPass('');
-                            }} variant="secondary" className="w-full">Hinzufügen</Button>
+                            }} variant="secondary" className="w-full">Nutzer +</Button>
                         </div>
                     </div>
                 </div>
                 
                 <div className="pt-8 mt-10 border-t flex justify-between items-center">
-                    <p className="text-[10px] text-gray-400">Build: 2025-05-v1.1.8</p>
+                    <p className="text-[10px] text-gray-400 italic">Bautagebuch v1.2.0 (Custom Branding Support)</p>
                     <Button variant="outline" onClick={() => { setShowSettings(false); setEditingTechId(null); }}>Schließen</Button>
                 </div>
             </div>
