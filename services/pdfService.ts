@@ -26,19 +26,10 @@ export const generateDiaryPdf = async (
 
   // Colors
   const brandBlue = [27, 62, 120]; // #1B3E78
-  const lightGray = [245, 245, 245];
-  const borderGray = [220, 220, 220];
   const textDark = [30, 30, 30];
+  const borderGray = [220, 220, 220];
 
-  // --- Helper: Footer ---
-  const addFooter = (pageNum: number) => {
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.text(`Seite ${pageNum}`, pageWidth / 2, pageHeight - 10, { align: "center" });
-    doc.text(`Erstellt mit IT-KOM Bautagebuch-System | ${new Date().toLocaleString('de-DE')}`, margin, pageHeight - 10);
-  };
-
-  // --- Header Section ---
+  // --- Header Section (Page 1) ---
   if (companyLogo) {
     try {
       const logoProps = doc.getImageProperties(companyLogo);
@@ -50,7 +41,7 @@ export const generateDiaryPdf = async (
 
   doc.setTextColor(brandBlue[0], brandBlue[1], brandBlue[2]);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(24);
+  doc.setFontSize(22);
   doc.text("BAUTAGEBUCH", margin, 25);
   
   doc.setFontSize(10);
@@ -63,7 +54,7 @@ export const generateDiaryPdf = async (
   
   yPos += 10;
 
-  // --- Information Grid (Table) ---
+  // --- Information Grid ---
   const drawInfoRow = (label: string, value: string, y: number) => {
     doc.setFillColor(252, 252, 252);
     doc.rect(margin, y - 5, contentWidth, 8, 'F');
@@ -71,7 +62,7 @@ export const generateDiaryPdf = async (
     doc.line(margin, y + 3, pageWidth - margin, y + 3);
     
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
+    doc.setFontSize(9);
     doc.setTextColor(100, 100, 100);
     doc.text(label, margin + 2, y);
     
@@ -90,17 +81,18 @@ export const generateDiaryPdf = async (
 
   yPos += 10;
 
-  // --- Section: Beschreibung ---
+  // --- Section Helper ---
   const drawSectionHeader = (title: string, color = brandBlue) => {
     doc.setFillColor(color[0], color[1], color[2]);
     doc.rect(margin, yPos, contentWidth, 7, 'F');
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
+    doc.setFontSize(9);
     doc.setTextColor(255, 255, 255);
     doc.text(title.toUpperCase(), margin + 2, yPos + 5);
     yPos += 10;
   };
 
+  // --- Description ---
   drawSectionHeader("Erledigte Arbeiten / Dokumentation");
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
@@ -113,59 +105,42 @@ export const generateDiaryPdf = async (
   doc.setLineWidth(0.1);
   doc.rect(margin, yPos - 3, contentWidth, descHeight);
   doc.text(splitDesc, margin + 2, yPos + 2);
-  
   yPos += descHeight + 10;
 
-  // --- Section: Material ---
+  // --- Material ---
   if (entry.materials.length > 0) {
-    if (yPos > 240) { doc.addPage(); yPos = 20; addFooter(doc.internal.pages.length - 1); }
+    if (yPos > 240) { doc.addPage(); yPos = 20; }
     drawSectionHeader("Eingesetztes Material");
     
-    doc.setFillColor(240, 240, 240);
-    doc.rect(margin, yPos - 3, contentWidth, 7, 'F');
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(100, 100, 100);
-    doc.text("MATERIALBEZEICHNUNG", margin + 2, yPos + 2);
-    doc.text("MENGE", pageWidth - margin - 30, yPos + 2, { align: "right" });
-    yPos += 7;
-
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-    
     entry.materials.forEach((m, i) => {
-        if (yPos > 270) { doc.addPage(); yPos = 20; addFooter(doc.internal.pages.length - 1); }
-        if (i % 2 === 0) doc.setFillColor(252, 252, 252); else doc.setFillColor(255, 255, 255);
-        doc.rect(margin, yPos - 3, contentWidth, 7, 'F');
-        doc.text(m.name, margin + 2, yPos + 2);
-        doc.text(m.amount, pageWidth - margin - 30, yPos + 2, { align: "right" });
-        yPos += 7;
+        if (yPos > 275) { doc.addPage(); yPos = 20; }
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.text(`• ${m.name}`, margin + 2, yPos);
+        doc.text(m.amount, pageWidth - margin - 5, yPos, { align: "right" });
+        yPos += 6;
     });
-    yPos += 5;
+    yPos += 10;
   }
 
-  // --- Section: Fotos ---
+  // --- Photos ---
   if (entry.images.length > 0) {
-    doc.addPage();
-    let pageNum = doc.internal.pages.length - 1;
-    addFooter(pageNum);
-    yPos = 25;
+    // Immer eine neue Seite für Fotos starten, wenn auf S1 schon viel steht
+    if (yPos > 60) {
+      doc.addPage();
+      yPos = 20;
+    }
     
-    doc.setFillColor(brandBlue[0], brandBlue[1], brandBlue[2]);
-    doc.rect(margin, yPos, contentWidth, 8, 'F');
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(255, 255, 255);
-    doc.text("FOTODOKUMENTATION", margin + 2, yPos + 5.5);
-    yPos += 15;
+    drawSectionHeader("Fotodokumentation");
+    yPos += 5;
 
-    const maxImgHeight = 110; // Deutlich größer für einspaltige Ansicht
+    const maxImgHeight = 100;
     const headerHeight = 7;
 
     for (let i = 0; i < entry.images.length; i++) {
-        // Prüfen, ob Bild + Header noch auf Seite passen
-        if (yPos + maxImgHeight + headerHeight + 10 > 280) {
+        // Prüfen, ob Bild + Header noch auf Seite passen (Limit 270 wegen Footer)
+        if (yPos + maxImgHeight + headerHeight + 10 > 270) {
             doc.addPage();
-            pageNum = doc.internal.pages.length - 1;
-            addFooter(pageNum);
             yPos = 20;
         }
 
@@ -173,52 +148,68 @@ export const generateDiaryPdf = async (
             const base64Img = await fileToBase64(entry.images[i]);
             const imgProps = doc.getImageProperties(base64Img);
             
-            // Header-Zeile für das Bild
+            // Header
             doc.setFillColor(245, 245, 245);
-            doc.setDrawColor(220, 220, 220);
+            doc.setDrawColor(200, 200, 200);
             doc.rect(margin, yPos, contentWidth, headerHeight, 'FD');
             doc.setFont("helvetica", "bold");
             doc.setFontSize(8);
             doc.setTextColor(100, 100, 100);
-            doc.text(`BILD ${i + 1}:`, margin + 2, yPos + 4.5);
-            doc.setFont("helvetica", "normal");
-            doc.text(entry.images[i].name, margin + 20, yPos + 4.5);
+            doc.text(`BILD ${i + 1}: ${entry.images[i].name}`, margin + 2, yPos + 4.5);
             yPos += headerHeight;
 
-            // Calculate Aspect Ratio Fit für die volle Breite
+            // Image Scaling
             const ratio = imgProps.width / imgProps.height;
             let renderWidth = contentWidth;
             let renderHeight = renderWidth / ratio;
 
-            // Wenn das Bild zu hoch wäre, begrenzen wir die Höhe
             if (renderHeight > maxImgHeight) {
                 renderHeight = maxImgHeight;
                 renderWidth = renderHeight * ratio;
             }
 
-            // Rahmen für das Bild
-            doc.setDrawColor(240, 240, 240);
-            doc.setFillColor(252, 252, 252);
-            doc.rect(margin, yPos, contentWidth, maxImgHeight, 'FD');
+            // Image Border Box
+            doc.setDrawColor(230, 230, 230);
+            doc.rect(margin, yPos, contentWidth, maxImgHeight);
 
-            // Zentriert einfügen
+            // Center Image
             const offsetX = (contentWidth - renderWidth) / 2;
             const offsetY = (maxImgHeight - renderHeight) / 2;
 
             doc.addImage(base64Img, 'JPEG', margin + offsetX, yPos + offsetY, renderWidth, renderHeight);
             
-            yPos += maxImgHeight + 8; // Abstand zum nächsten Bild
+            yPos += maxImgHeight + 12; 
         } catch (e) { 
-            console.error("Image add failed", e);
-            doc.setTextColor(255, 0, 0);
-            doc.text("Bild konnte nicht geladen werden.", margin + 2, yPos + 5);
+            console.error("Image error", e);
+            doc.setTextColor(200, 0, 0);
+            doc.text(`Fehler: Bild ${entry.images[i].name} konnte nicht eingebettet werden.`, margin, yPos + 5);
             yPos += 15;
         }
     }
   }
 
-  // Final Footer for Page 1
-  addFooter(1);
+  // --- Global Footer Pass ---
+  const totalPages = doc.internal.pages.length - 1; // jsPDF internal array has an extra empty one at the end
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    
+    // Line above footer
+    doc.setDrawColor(230, 230, 230);
+    doc.setLineWidth(0.1);
+    doc.line(margin, pageHeight - 15, pageWidth - margin, pageHeight - 15);
+    
+    // Left: Project Info
+    doc.text(`Projekt: ${projectName} | Datum: ${entry.date}`, margin, pageHeight - 10);
+    
+    // Right: Page Numbers
+    doc.text(`Seite ${i} von ${totalPages}`, pageWidth - margin, pageHeight - 10, { align: "right" });
+    
+    // Center: System info
+    doc.text("IT-KOM Bautagebuch-System", pageWidth / 2, pageHeight - 10, { align: "center" });
+  }
 
   return doc.output('blob');
 };
