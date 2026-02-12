@@ -3,22 +3,19 @@ import { jsPDF } from "jspdf";
 import { DiaryEntry } from "../types";
 
 // Helper to convert any browser-supported image File to a PDF-compatible Base64 JPEG
-// This ensures that formats like WebP or others are correctly processed.
 const fileToPdfImage = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
-        // Create a canvas to normalize the image (fixes orientation and format issues)
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          resolve(e.target?.result as string); // Fallback to raw base64
+          resolve(e.target?.result as string);
           return;
         }
 
-        // Set dimensions (cap size for PDF performance and to prevent memory crashes)
         const maxDim = 1200;
         let width = img.width;
         let height = img.height;
@@ -34,11 +31,9 @@ const fileToPdfImage = (file: File): Promise<string> => {
 
         canvas.width = width;
         canvas.height = height;
-        ctx.fillStyle = "white"; // Background for transparent images
+        ctx.fillStyle = "white"; 
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        
-        // Export as JPEG with good quality
         resolve(canvas.toDataURL('image/jpeg', 0.85));
       };
       img.onerror = () => reject(new Error("Bild konnte nicht geladen werden"));
@@ -144,14 +139,21 @@ export const generateDiaryPdf = async (
   yPos += descHeight + 10;
 
   // --- Material ---
-  if (entry.materials.length > 0) {
+  if (entry.materials && entry.materials.length > 0) {
     if (yPos > 240) { doc.addPage(); yPos = 20; }
     yPos = drawSectionHeader("Eingesetztes Material", yPos);
     
+    // WICHTIG: Textfarbe zurück auf Dunkel stellen, da Header sie auf Weiß setzt
+    doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+
     entry.materials.forEach((m) => {
-        if (yPos > 275) { doc.addPage(); yPos = 20; }
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
+        if (yPos > 280) { 
+            doc.addPage(); 
+            yPos = 20; 
+            doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+        }
         doc.text(`• ${m.name}`, margin + 2, yPos);
         doc.text(m.amount, pageWidth - margin - 5, yPos, { align: "right" });
         yPos += 6;
@@ -160,7 +162,7 @@ export const generateDiaryPdf = async (
   }
 
   // --- Photos Section (Grid 2x4, max 8 per page) ---
-  if (entry.images.length > 0) {
+  if (entry.images && entry.images.length > 0) {
     doc.addPage();
     yPos = 20;
     yPos = drawSectionHeader("Fotodokumentation", yPos);
@@ -177,7 +179,6 @@ export const generateDiaryPdf = async (
     for (let i = 0; i < entry.images.length; i++) {
         const imageIndexOnPage = i % 8;
         
-        // Start a new page if we reached 8 images
         if (i > 0 && imageIndexOnPage === 0) {
             doc.addPage();
             yPos = 20;
@@ -192,11 +193,9 @@ export const generateDiaryPdf = async (
         const y = yPos + (row * (blockHeight + verticalGap));
 
         try {
-            // Use the robust converter to ensure PDF compatibility for all formats
             const base64Img = await fileToPdfImage(entry.images[i]);
             const imgProps = doc.getImageProperties(base64Img);
             
-            // Image Label (allows original filenames)
             doc.setFillColor(248, 248, 248);
             doc.setDrawColor(220, 220, 220);
             doc.rect(x, y, imgWidth, labelHeight, 'FD');
@@ -204,14 +203,12 @@ export const generateDiaryPdf = async (
             doc.setFontSize(6.5);
             doc.setTextColor(120, 120, 120);
             
-            // Truncate filename gracefully if too long for the box
             let displayTitle = `${i + 1}: ${entry.images[i].name}`;
             if (doc.getTextWidth(displayTitle) > imgWidth - 4) {
                displayTitle = doc.splitTextToSize(displayTitle, imgWidth - 4)[0] + "...";
             }
             doc.text(displayTitle, x + 2, y + 4);
 
-            // Calculate scaling for centering
             const ratio = imgProps.width / imgProps.height;
             let renderWidth = imgWidth;
             let renderHeight = renderWidth / ratio;
@@ -224,7 +221,6 @@ export const generateDiaryPdf = async (
             const offsetX = (imgWidth - renderWidth) / 2;
             const offsetY = (imgHeight - renderHeight) / 2;
 
-            // Optional subtle background/border for the image area
             doc.setDrawColor(245, 245, 245);
             doc.rect(x, y + labelHeight, imgWidth, imgHeight);
 

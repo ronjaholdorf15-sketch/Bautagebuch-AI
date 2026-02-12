@@ -76,6 +76,12 @@ const BackupIcon = () => (
     </svg>
 );
 
+const InfoIcon = () => (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+);
+
 const STORAGE_KEY = 'glasfaser_app_config_v2';
 const DRAFT_KEY = 'glasfaser_entry_draft_v1';
 
@@ -85,6 +91,7 @@ export default function App() {
   const [loginCode, setLoginCode] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [status, setStatus] = useState<FormStatus>({ step: 'login' });
   const [uploadMessage, setUploadMessage] = useState("");
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -181,7 +188,7 @@ export default function App() {
                 if (confirm("Möchten Sie die aktuelle Konfiguration wirklich mit diesem Backup überschreiben?")) {
                     saveConfig(imported);
                     alert("Konfiguration erfolgreich importiert.");
-                    window.location.reload(); // Reload to ensure all states are clean
+                    window.location.reload(); 
                 }
             } else {
                 alert("Ungültige Backup-Datei.");
@@ -487,15 +494,65 @@ export default function App() {
 
       {showSettings && currentUser?.role === 'admin' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-6xl max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-6xl max-h-[90vh] overflow-y-auto shadow-2xl relative">
                 <div className="flex justify-between items-center mb-6 border-b pb-4">
                     <h3 className="text-2xl font-bold text-brand-900">Administration</h3>
                     <div className="flex items-center gap-2">
-                        <span className="text-[10px] bg-green-100 text-green-700 px-2 py-1 rounded-full font-bold uppercase tracking-widest">Permanent gesichert</span>
-                        <button onClick={() => { setShowSettings(false); setEditingTechId(null); }} className="p-2 text-gray-500 hover:text-gray-800"><CloseIcon /></button>
+                        <button 
+                            onClick={() => setShowHelp(!showHelp)} 
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${showHelp ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-brand-50 text-brand-700 border border-brand-100'}`}
+                        >
+                            <InfoIcon /> {showHelp ? 'Hilfe schließen' : 'Nextcloud Setup Hilfe'}
+                        </button>
+                        <button onClick={() => { setShowSettings(false); setEditingTechId(null); setShowHelp(false); }} className="p-2 text-gray-500 hover:text-gray-800"><CloseIcon /></button>
                     </div>
                 </div>
                 
+                {showHelp && (
+                    <div className="mb-8 p-6 bg-orange-50 rounded-2xl border border-orange-100 animate-in fade-in slide-in-from-top-4 duration-300">
+                        <div className="flex items-start gap-4">
+                            <div className="p-3 bg-white rounded-xl shadow-sm">
+                                <InfoIcon />
+                            </div>
+                            <div className="flex-1">
+                                <h4 className="text-lg font-bold text-orange-900 mb-2">Nextcloud CORS Konfiguration</h4>
+                                <p className="text-sm text-orange-800 mb-4 leading-relaxed">
+                                    Damit die App Berichte in deine Nextcloud hochladen kann, musst du Cross-Origin Resource Sharing (CORS) erlauben. 
+                                    Füge den folgenden Code am Ende der <strong>.htaccess</strong> Datei im Hauptverzeichnis deiner Nextcloud-Installation hinzu:
+                                </p>
+                                <div className="relative group">
+                                    <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-[11px] font-mono overflow-x-auto border-4 border-gray-800 shadow-inner">
+{`# CORS FÜR BAUTAGEBUCH APP
+<IfModule mod_headers.c>
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, MKCOL, PROPFIND"
+    Header always set Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With, Range"
+    Header always set Access-Control-Expose-Headers "Content-Location, Location"
+
+    RewriteEngine On
+    RewriteCond %{REQUEST_METHOD} OPTIONS
+    RewriteRule ^(.*)$ $1 [R=200,L]
+</IfModule>`}
+                                    </pre>
+                                    <button 
+                                        onClick={() => {
+                                            const code = `# CORS FÜR BAUTAGEBUCH APP\n<IfModule mod_headers.c>\n    Header always set Access-Control-Allow-Origin "*"\n    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, MKCOL, PROPFIND"\n    Header always set Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With, Range"\n    Header always set Access-Control-Expose-Headers "Content-Location, Location"\n\n    RewriteEngine On\n    RewriteCond %{REQUEST_METHOD} OPTIONS\n    RewriteRule ^(.*)$ $1 [R=200,L]\n</IfModule>`;
+                                            navigator.clipboard.writeText(code);
+                                            alert("Code wurde in die Zwischenablage kopiert.");
+                                        }}
+                                        className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 text-white text-[10px] px-2 py-1 rounded border border-white/20"
+                                    >
+                                        Code kopieren
+                                    </button>
+                                </div>
+                                <p className="mt-4 text-[12px] text-orange-700 italic">
+                                    Hinweis: Die Änderung greift sofort. Falls du Fehlermeldungen beim Upload erhältst, prüfe ob das <strong>"Bearbeiten erlauben"</strong> Häkchen beim Nextcloud-Share gesetzt ist.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 <div className="grid lg:grid-cols-3 gap-8">
                     {/* Firmenlogo & Backup */}
                     <div className="space-y-6">
@@ -617,7 +674,7 @@ export default function App() {
                 
                 <div className="pt-6 mt-8 border-t flex justify-between items-center">
                     <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Verwaltungskonsole v1.2.6</p>
-                    <Button variant="outline" onClick={() => { setShowSettings(false); setEditingTechId(null); }}>Schließen</Button>
+                    <Button variant="outline" onClick={() => { setShowSettings(false); setEditingTechId(null); setShowHelp(false); }}>Schließen</Button>
                 </div>
             </div>
         </div>
