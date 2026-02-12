@@ -81,18 +81,18 @@ export const generateDiaryPdf = async (
 
   yPos += 10;
 
-  const drawSectionHeader = (title: string, color = brandBlue) => {
+  const drawSectionHeader = (title: string, y: number, color = brandBlue) => {
     doc.setFillColor(color[0], color[1], color[2]);
-    doc.rect(margin, yPos, contentWidth, 7, 'F');
+    doc.rect(margin, y, contentWidth, 7, 'F');
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
     doc.setTextColor(255, 255, 255);
-    doc.text(title.toUpperCase(), margin + 2, yPos + 5);
-    yPos += 10;
+    doc.text(title.toUpperCase(), margin + 2, y + 5);
+    return y + 10;
   };
 
   // --- Description ---
-  drawSectionHeader("Erledigte Arbeiten / Dokumentation");
+  yPos = drawSectionHeader("Erledigte Arbeiten / Dokumentation", yPos);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(textDark[0], textDark[1], textDark[2]);
@@ -109,7 +109,7 @@ export const generateDiaryPdf = async (
   // --- Material ---
   if (entry.materials.length > 0) {
     if (yPos > 240) { doc.addPage(); yPos = 20; }
-    drawSectionHeader("Eingesetztes Material");
+    yPos = drawSectionHeader("Eingesetztes Material", yPos);
     
     entry.materials.forEach((m) => {
         if (yPos > 275) { doc.addPage(); yPos = 20; }
@@ -122,71 +122,90 @@ export const generateDiaryPdf = async (
     yPos += 10;
   }
 
-  // --- Photos Section ---
+  // --- Photos Section (Grid 2x4) ---
   if (entry.images.length > 0) {
-    if (yPos > 60) {
-      doc.addPage();
-      yPos = 20;
-    }
-    
-    drawSectionHeader("Fotodokumentation");
+    // Start images on a clean page for the grid
+    doc.addPage();
+    yPos = 20;
+    yPos = drawSectionHeader("Fotodokumentation", yPos);
     yPos += 5;
 
-    const maxImgHeight = 105; 
-    const headerHeight = 7;
-    const bottomGap = 10; // Reduzierter Abstand um Platz zu sparen
+    const cols = 2;
+    const horizontalGap = 8;
+    const verticalGap = 8;
+    const imgWidth = (contentWidth - horizontalGap) / cols;
+    const imgHeight = 52; // Fixe Höhe für das Grid-Element (ca. 4 Reihen passen)
+    const labelHeight = 6;
+    const blockHeight = imgHeight + labelHeight;
 
     for (let i = 0; i < entry.images.length; i++) {
+        // Berechne Index auf aktueller Seite (0-7)
+        const imageIndexOnPage = i % 8;
+        
+        // Wenn 8 Bilder erreicht sind, neue Seite (außer bei dem allerletzten Bild)
+        if (i > 0 && imageIndexOnPage === 0) {
+            doc.addPage();
+            yPos = 20;
+            yPos = drawSectionHeader("Fotodokumentation (Fortsetzung)", yPos);
+            yPos += 5;
+        }
+
+        const col = imageIndexOnPage % cols;
+        const row = Math.floor(imageIndexOnPage / cols);
+        
+        const x = margin + (col * (imgWidth + horizontalGap));
+        const y = yPos + (row * (blockHeight + verticalGap));
+
         try {
             const base64Img = await fileToBase64(entry.images[i]);
             const imgProps = doc.getImageProperties(base64Img);
             
-            let renderWidth = contentWidth;
-            let renderHeight = renderWidth / (imgProps.width / imgProps.height);
-
-            if (renderHeight > maxImgHeight) {
-                renderHeight = maxImgHeight;
-                renderWidth = renderHeight * (imgProps.width / imgProps.height);
-            }
-
-            // Sicherstellen, dass Bild + Header + Gap + Footer-Buffer (25) passen
-            const blockHeight = headerHeight + renderHeight + bottomGap;
-            if (yPos + blockHeight > pageHeight - 25) {
-                doc.addPage();
-                yPos = 20;
-            }
-
-            // 1. Header (Dateiname)
+            // Header für das Bild (Index & Dateiname)
             doc.setFillColor(248, 248, 248);
             doc.setDrawColor(220, 220, 220);
-            doc.setLineWidth(0.1);
-            doc.rect(margin, yPos, contentWidth, headerHeight, 'FD');
+            doc.rect(x, y, imgWidth, labelHeight, 'FD');
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(7.5);
+            doc.setFontSize(7);
             doc.setTextColor(120, 120, 120);
-            doc.text(`BILD ${i + 1}: ${entry.images[i].name}`, margin + 3, yPos + 4.5);
-            yPos += headerHeight;
+            const fileName = entry.images[i].name.length > 25 ? entry.images[i].name.substring(0, 22) + "..." : entry.images[i].name;
+            doc.text(`${i + 1}: ${fileName}`, x + 2, y + 4.5);
 
-            // 2. Bild zeichnen
-            const offsetX = (contentWidth - renderWidth) / 2;
-            doc.addImage(base64Img, 'JPEG', margin + offsetX, yPos, renderWidth, renderHeight);
-            
-            // 3. Optionaler Rahmen um das Bild (hilft bei weißen Bildern)
+            // Bild skalieren und zentrieren innerhalb des Grid-Feldes
+            const ratio = imgProps.width / imgProps.height;
+            let renderWidth = imgWidth;
+            let renderHeight = renderWidth / ratio;
+
+            if (renderHeight > imgHeight) {
+                renderHeight = imgHeight;
+                renderWidth = renderHeight * ratio;
+            }
+
+            const offsetX = (imgWidth - renderWidth) / 2;
+            const offsetY = (imgHeight - renderHeight) / 2;
+
+            // Rahmen um den Bildbereich
             doc.setDrawColor(240, 240, 240);
-            doc.rect(margin + offsetX, yPos, renderWidth, renderHeight);
+            doc.rect(x, y + labelHeight, imgWidth, imgHeight);
 
-            yPos += renderHeight + bottomGap;
+            doc.addImage(
+                base64Img, 
+                'JPEG', 
+                x + offsetX, 
+                y + labelHeight + offsetY, 
+                renderWidth, 
+                renderHeight
+            );
 
-        } catch (e) { 
+        } catch (e) {
             console.error("PDF Image Error:", e);
-            doc.setTextColor(255, 0, 0);
-            doc.text(`[Fehler beim Laden von Bild ${i+1}]`, margin, yPos + 5);
-            yPos += 10;
+            doc.setFontSize(8);
+            doc.setTextColor(200, 0, 0);
+            doc.text(`[Fehler Bild ${i+1}]`, x + 5, y + labelHeight + 10);
         }
     }
   }
 
-  // --- Globaler Footer ---
+  // --- Globaler Footer Pass ---
   const totalPages = doc.internal.pages.length - 1;
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
