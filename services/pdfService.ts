@@ -29,7 +29,7 @@ export const generateDiaryPdf = async (
   const textDark = [30, 30, 30];
   const borderGray = [220, 220, 220];
 
-  // --- Header Section (Page 1) ---
+  // --- Header Section ---
   if (companyLogo) {
     try {
       const logoProps = doc.getImageProperties(companyLogo);
@@ -81,7 +81,6 @@ export const generateDiaryPdf = async (
 
   yPos += 10;
 
-  // --- Section Helper ---
   const drawSectionHeader = (title: string, color = brandBlue) => {
     doc.setFillColor(color[0], color[1], color[2]);
     doc.rect(margin, yPos, contentWidth, 7, 'F');
@@ -112,7 +111,7 @@ export const generateDiaryPdf = async (
     if (yPos > 240) { doc.addPage(); yPos = 20; }
     drawSectionHeader("Eingesetztes Material");
     
-    entry.materials.forEach((m, i) => {
+    entry.materials.forEach((m) => {
         if (yPos > 275) { doc.addPage(); yPos = 20; }
         doc.setFont("helvetica", "normal");
         doc.setFontSize(9);
@@ -125,8 +124,7 @@ export const generateDiaryPdf = async (
 
   // --- Photos Section ---
   if (entry.images.length > 0) {
-    // Start images on a clean page if current page is already well-filled
-    if (yPos > 50) {
+    if (yPos > 60) {
       doc.addPage();
       yPos = 20;
     }
@@ -134,97 +132,72 @@ export const generateDiaryPdf = async (
     drawSectionHeader("Fotodokumentation");
     yPos += 5;
 
-    const maxImgHeight = 110; // Max allowed height per image to fit at least 2 per page if possible
-    const headerHeight = 8;
-    const bottomGap = 15; // Gap between image blocks
+    const maxImgHeight = 105; 
+    const headerHeight = 7;
+    const bottomGap = 10; // Reduzierter Abstand um Platz zu sparen
 
     for (let i = 0; i < entry.images.length; i++) {
         try {
             const base64Img = await fileToBase64(entry.images[i]);
             const imgProps = doc.getImageProperties(base64Img);
             
-            // Calculate scaled dimensions
-            const ratio = imgProps.width / imgProps.height;
             let renderWidth = contentWidth;
-            let renderHeight = renderWidth / ratio;
+            let renderHeight = renderWidth / (imgProps.width / imgProps.height);
 
-            // Constrain height if image is too tall
             if (renderHeight > maxImgHeight) {
                 renderHeight = maxImgHeight;
-                renderWidth = renderHeight * ratio;
+                renderWidth = renderHeight * (imgProps.width / imgProps.height);
             }
 
-            // CHECK: Does header + image + spacing fit on current page?
-            // Page limit is 275 to leave space for the global footer
-            if (yPos + headerHeight + renderHeight + bottomGap > 275) {
+            // Sicherstellen, dass Bild + Header + Gap + Footer-Buffer (25) passen
+            const blockHeight = headerHeight + renderHeight + bottomGap;
+            if (yPos + blockHeight > pageHeight - 25) {
                 doc.addPage();
                 yPos = 20;
-                // Re-draw section header on new page if it's the start of images
-                doc.setFillColor(brandBlue[0], brandBlue[1], brandBlue[2]);
-                doc.rect(margin, yPos, contentWidth, 7, 'F');
-                doc.setFont("helvetica", "bold");
-                doc.setFontSize(9);
-                doc.setTextColor(255, 255, 255);
-                doc.text(`FOTODOKUMENTATION (FORTSETZUNG)`, margin + 2, yPos + 5);
-                yPos += 15;
             }
 
-            // 1. Draw Image Header (Grey bar with filename)
-            doc.setFillColor(245, 245, 245);
-            doc.setDrawColor(200, 200, 200);
+            // 1. Header (Dateiname)
+            doc.setFillColor(248, 248, 248);
+            doc.setDrawColor(220, 220, 220);
             doc.setLineWidth(0.1);
             doc.rect(margin, yPos, contentWidth, headerHeight, 'FD');
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(8);
-            doc.setTextColor(100, 100, 100);
-            doc.text(`BILD ${i + 1}: ${entry.images[i].name}`, margin + 3, yPos + 5.5);
+            doc.setFontSize(7.5);
+            doc.setTextColor(120, 120, 120);
+            doc.text(`BILD ${i + 1}: ${entry.images[i].name}`, margin + 3, yPos + 4.5);
             yPos += headerHeight;
 
-            // 2. Center and Draw Image
+            // 2. Bild zeichnen
             const offsetX = (contentWidth - renderWidth) / 2;
-            
-            // Add subtle border around image
-            doc.setDrawColor(230, 230, 230);
-            doc.rect(margin, yPos, contentWidth, renderHeight);
-            
             doc.addImage(base64Img, 'JPEG', margin + offsetX, yPos, renderWidth, renderHeight);
             
-            // 3. Move cursor down for next image
-            yPos += renderHeight + bottomGap; 
+            // 3. Optionaler Rahmen um das Bild (hilft bei weißen Bildern)
+            doc.setDrawColor(240, 240, 240);
+            doc.rect(margin + offsetX, yPos, renderWidth, renderHeight);
+
+            yPos += renderHeight + bottomGap;
 
         } catch (e) { 
-            console.error("Image processing error for image index:", i, e);
-            // Fallback: draw error box instead of skipping entirely to keep numbering intact
-            doc.setDrawColor(255, 0, 0);
-            doc.rect(margin, yPos, contentWidth, 20);
+            console.error("PDF Image Error:", e);
             doc.setTextColor(255, 0, 0);
-            doc.setFontSize(10);
-            doc.text(`Fehler: Bild ${entry.images[i].name} konnte nicht geladen werden.`, margin + 5, yPos + 12);
-            yPos += 30;
+            doc.text(`[Fehler beim Laden von Bild ${i+1}]`, margin, yPos + 5);
+            yPos += 10;
         }
     }
   }
 
-  // --- Global Footer Pass (Executed on ALL generated pages) ---
+  // --- Globaler Footer ---
   const totalPages = doc.internal.pages.length - 1;
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(150, 150, 150);
-    
-    // Line above footer
     doc.setDrawColor(230, 230, 230);
     doc.setLineWidth(0.1);
     doc.line(margin, pageHeight - 15, pageWidth - margin, pageHeight - 15);
-    
-    // Left: Project Info
     doc.text(`Projekt: ${projectName} | Datum: ${entry.date}`, margin, pageHeight - 10);
-    
-    // Center: Identity
     doc.text("IT-KOM Bautagebuch-System", pageWidth / 2, pageHeight - 10, { align: "center" });
-
-    // Right: Page Numbers
     doc.text(`Seite ${i} von ${totalPages}`, pageWidth - margin, pageHeight - 10, { align: "right" });
   }
 
