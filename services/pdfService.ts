@@ -157,60 +157,63 @@ export const generateDiaryPdf = async (
     doc.text("FOTODOKUMENTATION", margin + 2, yPos + 5.5);
     yPos += 15;
 
-    // Grid configuration
-    const gridSpacing = 10;
-    const maxImgWidth = (contentWidth - gridSpacing) / 2;
-    const maxImgHeight = 75; // Maximale Höhe pro Bild-Slot
-    let col = 0;
+    const maxImgHeight = 110; // Deutlich größer für einspaltige Ansicht
+    const headerHeight = 7;
 
     for (let i = 0; i < entry.images.length; i++) {
-        if (yPos + maxImgHeight + 15 > 275) {
+        // Prüfen, ob Bild + Header noch auf Seite passen
+        if (yPos + maxImgHeight + headerHeight + 10 > 280) {
             doc.addPage();
             pageNum = doc.internal.pages.length - 1;
             addFooter(pageNum);
             yPos = 20;
-            col = 0;
         }
 
         try {
             const base64Img = await fileToBase64(entry.images[i]);
             const imgProps = doc.getImageProperties(base64Img);
             
-            // Calculate Aspect Ratio Fit
+            // Header-Zeile für das Bild
+            doc.setFillColor(245, 245, 245);
+            doc.setDrawColor(220, 220, 220);
+            doc.rect(margin, yPos, contentWidth, headerHeight, 'FD');
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(8);
+            doc.setTextColor(100, 100, 100);
+            doc.text(`BILD ${i + 1}:`, margin + 2, yPos + 4.5);
+            doc.setFont("helvetica", "normal");
+            doc.text(entry.images[i].name, margin + 20, yPos + 4.5);
+            yPos += headerHeight;
+
+            // Calculate Aspect Ratio Fit für die volle Breite
             const ratio = imgProps.width / imgProps.height;
-            let renderWidth = maxImgWidth;
+            let renderWidth = contentWidth;
             let renderHeight = renderWidth / ratio;
 
+            // Wenn das Bild zu hoch wäre, begrenzen wir die Höhe
             if (renderHeight > maxImgHeight) {
                 renderHeight = maxImgHeight;
                 renderWidth = renderHeight * ratio;
             }
 
-            const slotX = margin + (col * (maxImgWidth + gridSpacing));
-            
-            // Hintergrund-Box zeichnen (für einheitliches Grid)
-            doc.setFillColor(250, 250, 250);
-            doc.setDrawColor(230, 230, 230);
-            doc.rect(slotX, yPos, maxImgWidth, maxImgHeight, 'FD');
+            // Rahmen für das Bild
+            doc.setDrawColor(240, 240, 240);
+            doc.setFillColor(252, 252, 252);
+            doc.rect(margin, yPos, contentWidth, maxImgHeight, 'FD');
 
-            // Bild im Slot zentrieren
-            const offsetX = (maxImgWidth - renderWidth) / 2;
+            // Zentriert einfügen
+            const offsetX = (contentWidth - renderWidth) / 2;
             const offsetY = (maxImgHeight - renderHeight) / 2;
 
-            doc.addImage(base64Img, 'JPEG', slotX + offsetX, yPos + offsetY, renderWidth, renderHeight);
+            doc.addImage(base64Img, 'JPEG', margin + offsetX, yPos + offsetY, renderWidth, renderHeight);
             
-            doc.setFontSize(7);
-            doc.setTextColor(150, 150, 150);
-            const fileNameShort = entry.images[i].name.substring(0, 30);
-            doc.text(`Bild ${i+1}: ${fileNameShort}`, slotX, yPos + maxImgHeight + 4);
-
-            if (col === 1) {
-                yPos += maxImgHeight + 15;
-                col = 0;
-            } else {
-                col = 1;
-            }
-        } catch (e) { console.error("Image add failed", e); }
+            yPos += maxImgHeight + 8; // Abstand zum nächsten Bild
+        } catch (e) { 
+            console.error("Image add failed", e);
+            doc.setTextColor(255, 0, 0);
+            doc.text("Bild konnte nicht geladen werden.", margin + 2, yPos + 5);
+            yPos += 15;
+        }
     }
   }
 
