@@ -123,10 +123,10 @@ export const generateDiaryPdf = async (
     yPos += 10;
   }
 
-  // --- Photos ---
+  // --- Photos Section ---
   if (entry.images.length > 0) {
-    // Immer eine neue Seite für Fotos starten, wenn auf S1 schon viel steht
-    if (yPos > 60) {
+    // Start images on a clean page if current page is already well-filled
+    if (yPos > 50) {
       doc.addPage();
       yPos = 20;
     }
@@ -134,62 +134,79 @@ export const generateDiaryPdf = async (
     drawSectionHeader("Fotodokumentation");
     yPos += 5;
 
-    const maxImgHeight = 100;
-    const headerHeight = 7;
+    const maxImgHeight = 110; // Max allowed height per image to fit at least 2 per page if possible
+    const headerHeight = 8;
+    const bottomGap = 15; // Gap between image blocks
 
     for (let i = 0; i < entry.images.length; i++) {
-        // Prüfen, ob Bild + Header noch auf Seite passen (Limit 270 wegen Footer)
-        if (yPos + maxImgHeight + headerHeight + 10 > 270) {
-            doc.addPage();
-            yPos = 20;
-        }
-
         try {
             const base64Img = await fileToBase64(entry.images[i]);
             const imgProps = doc.getImageProperties(base64Img);
             
-            // Header
-            doc.setFillColor(245, 245, 245);
-            doc.setDrawColor(200, 200, 200);
-            doc.rect(margin, yPos, contentWidth, headerHeight, 'FD');
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(8);
-            doc.setTextColor(100, 100, 100);
-            doc.text(`BILD ${i + 1}: ${entry.images[i].name}`, margin + 2, yPos + 4.5);
-            yPos += headerHeight;
-
-            // Image Scaling
+            // Calculate scaled dimensions
             const ratio = imgProps.width / imgProps.height;
             let renderWidth = contentWidth;
             let renderHeight = renderWidth / ratio;
 
+            // Constrain height if image is too tall
             if (renderHeight > maxImgHeight) {
                 renderHeight = maxImgHeight;
                 renderWidth = renderHeight * ratio;
             }
 
-            // Image Border Box
-            doc.setDrawColor(230, 230, 230);
-            doc.rect(margin, yPos, contentWidth, maxImgHeight);
+            // CHECK: Does header + image + spacing fit on current page?
+            // Page limit is 275 to leave space for the global footer
+            if (yPos + headerHeight + renderHeight + bottomGap > 275) {
+                doc.addPage();
+                yPos = 20;
+                // Re-draw section header on new page if it's the start of images
+                doc.setFillColor(brandBlue[0], brandBlue[1], brandBlue[2]);
+                doc.rect(margin, yPos, contentWidth, 7, 'F');
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(9);
+                doc.setTextColor(255, 255, 255);
+                doc.text(`FOTODOKUMENTATION (FORTSETZUNG)`, margin + 2, yPos + 5);
+                yPos += 15;
+            }
 
-            // Center Image
+            // 1. Draw Image Header (Grey bar with filename)
+            doc.setFillColor(245, 245, 245);
+            doc.setDrawColor(200, 200, 200);
+            doc.setLineWidth(0.1);
+            doc.rect(margin, yPos, contentWidth, headerHeight, 'FD');
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(8);
+            doc.setTextColor(100, 100, 100);
+            doc.text(`BILD ${i + 1}: ${entry.images[i].name}`, margin + 3, yPos + 5.5);
+            yPos += headerHeight;
+
+            // 2. Center and Draw Image
             const offsetX = (contentWidth - renderWidth) / 2;
-            const offsetY = (maxImgHeight - renderHeight) / 2;
-
-            doc.addImage(base64Img, 'JPEG', margin + offsetX, yPos + offsetY, renderWidth, renderHeight);
             
-            yPos += maxImgHeight + 12; 
+            // Add subtle border around image
+            doc.setDrawColor(230, 230, 230);
+            doc.rect(margin, yPos, contentWidth, renderHeight);
+            
+            doc.addImage(base64Img, 'JPEG', margin + offsetX, yPos, renderWidth, renderHeight);
+            
+            // 3. Move cursor down for next image
+            yPos += renderHeight + bottomGap; 
+
         } catch (e) { 
-            console.error("Image error", e);
-            doc.setTextColor(200, 0, 0);
-            doc.text(`Fehler: Bild ${entry.images[i].name} konnte nicht eingebettet werden.`, margin, yPos + 5);
-            yPos += 15;
+            console.error("Image processing error for image index:", i, e);
+            // Fallback: draw error box instead of skipping entirely to keep numbering intact
+            doc.setDrawColor(255, 0, 0);
+            doc.rect(margin, yPos, contentWidth, 20);
+            doc.setTextColor(255, 0, 0);
+            doc.setFontSize(10);
+            doc.text(`Fehler: Bild ${entry.images[i].name} konnte nicht geladen werden.`, margin + 5, yPos + 12);
+            yPos += 30;
         }
     }
   }
 
-  // --- Global Footer Pass ---
-  const totalPages = doc.internal.pages.length - 1; // jsPDF internal array has an extra empty one at the end
+  // --- Global Footer Pass (Executed on ALL generated pages) ---
+  const totalPages = doc.internal.pages.length - 1;
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
     doc.setFont("helvetica", "normal");
@@ -204,11 +221,11 @@ export const generateDiaryPdf = async (
     // Left: Project Info
     doc.text(`Projekt: ${projectName} | Datum: ${entry.date}`, margin, pageHeight - 10);
     
+    // Center: Identity
+    doc.text("IT-KOM Bautagebuch-System", pageWidth / 2, pageHeight - 10, { align: "center" });
+
     // Right: Page Numbers
     doc.text(`Seite ${i} von ${totalPages}`, pageWidth - margin, pageHeight - 10, { align: "right" });
-    
-    // Center: System info
-    doc.text("IT-KOM Bautagebuch-System", pageWidth / 2, pageHeight - 10, { align: "center" });
   }
 
   return doc.output('blob');
