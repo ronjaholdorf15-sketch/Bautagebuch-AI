@@ -34,12 +34,6 @@ const SettingsIcon = () => (
   </svg>
 );
 
-const InfoIcon = () => (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-);
-
 const CloseIcon = () => (
   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -87,7 +81,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [status, setStatus] = useState<FormStatus>({ step: 'login' });
-  const [uploadMessage, setUploadMessage] = useState("Daten werden hochgeladen...");
+  const [uploadMessage, setUploadMessage] = useState("");
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
   const [lastGeneratedPdf, setLastGeneratedPdf] = useState<Blob | null>(null);
@@ -125,9 +119,6 @@ export default function App() {
   const [isAnalyzingImages, setIsAnalyzingImages] = useState(false);
   const [isGeneratingPdfOnly, setIsGeneratingPdfOnly] = useState(false);
 
-  // Die Domain dieser Web-App
-  const currentAppDomain = window.location.origin;
-
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     let loadedConfig: AppConfig = { technicians: [], projects: [] };
@@ -135,62 +126,27 @@ export default function App() {
       try { loadedConfig = JSON.parse(stored); } catch (e) {}
     }
     
-    // Standard-Benutzer sicherstellen
-    const hasRH = loadedConfig.technicians.some(t => t.code.toUpperCase() === 'RH');
-    const hasAdmin = loadedConfig.technicians.some(t => t.code.toUpperCase() === 'ADMIN');
-    
-    let updated = false;
-    if (!hasRH) {
-        loadedConfig.technicians.push({ 
-            id: 'rh-init', 
-            name: 'Projektleiter RH', 
-            code: 'RH', 
-            password: '1234', 
-            role: 'admin' 
-        });
-        updated = true;
-    }
-    if (!hasAdmin) {
+    // Initial-Admin sicherstellen falls Liste leer
+    if (loadedConfig.technicians.length === 0) {
         loadedConfig.technicians.push({ 
             id: 'admin-init', 
             name: 'Administrator', 
-            code: 'Admin', 
+            code: 'ADMIN', 
             password: 'admin', 
             role: 'admin' 
         });
-        updated = true;
-    }
-
-    if (updated) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(loadedConfig));
     }
     setConfig(loadedConfig);
   }, []);
 
+  // Entwurfs-Logik
   useEffect(() => {
     if (status.step === 'form' && currentUser) {
         const { images, technician, ...draftData } = entry;
         localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...draftData, projectIndex: selectedProjectIndex }));
     }
   }, [entry, selectedProjectIndex, status.step, currentUser]);
-
-  useEffect(() => {
-    if (status.step === 'form' && currentUser) {
-        const savedDraft = localStorage.getItem(DRAFT_KEY);
-        if (savedDraft) {
-            try {
-                const parsed = JSON.parse(savedDraft);
-                const { projectIndex, ...restEntry } = parsed;
-                if (restEntry.date) {
-                    setEntry(prev => ({ ...prev, ...restEntry, technician: currentUser.name, images: [] }));
-                    if (projectIndex >= 0) setSelectedProjectIndex(projectIndex);
-                    setDraftRestored(true);
-                    setTimeout(() => setDraftRestored(false), 3000);
-                }
-            } catch (e) {}
-        }
-    }
-  }, [status.step, currentUser]);
 
   const saveConfig = (newConfig: AppConfig) => {
     setConfig(newConfig);
@@ -199,7 +155,7 @@ export default function App() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    const tech = config.technicians.find(t => t.code.toLowerCase() === loginCode.toLowerCase());
+    const tech = config.technicians.find(t => t.code.toUpperCase() === loginCode.toUpperCase());
     if (tech) {
         if (tech.password && tech.password !== loginPassword) { alert("Falsches Passwort."); return; }
         setCurrentUser(tech);
@@ -208,7 +164,7 @@ export default function App() {
     } else alert("Benutzer nicht gefunden.");
   };
 
-  const handleLogout = () => { setCurrentUser(null); setStatus({ step: 'login' }); setShowSettings(false); };
+  const handleLogout = () => { setCurrentUser(null); setStatus({ step: 'login' }); setShowSettings(false); setLoginCode(''); setLoginPassword(''); };
 
   const downloadBlob = (blob: Blob, filename: string) => {
       const url = window.URL.createObjectURL(blob);
@@ -259,26 +215,8 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onloadend = () => {
-        saveConfig({ ...config, logo: reader.result as string });
-    };
+    reader.onloadend = () => saveConfig({ ...config, logo: reader.result as string });
     reader.readAsDataURL(file);
-  };
-
-  const addMaterial = () => {
-    if (!materialInput.name || !materialInput.amount) return;
-    setEntry(prev => ({ ...prev, materials: [...prev.materials, { ...materialInput }] }));
-    setMaterialInput({ name: '', amount: '' });
-  };
-
-  const removeMaterial = (index: number) => {
-    setEntry(prev => ({ ...prev, materials: prev.materials.filter((_, i) => i !== index) }));
-  };
-
-  const copyToClipboard = (text: string) => {
-      if (navigator.clipboard) {
-          navigator.clipboard.writeText(text).then(() => alert("Kopiert!"));
-      }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -288,18 +226,18 @@ export default function App() {
     setUploadError(null);
     try {
       setStatus({ step: 'uploading' });
-      setUploadMessage("Generiere PDF-Bericht...");
+      setUploadMessage("Generiere PDF...");
       const logoBase64 = await getLogoAsBase64(config.logo);
       const pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
       setLastGeneratedPdf(pdfBlob); 
       
-      setUploadMessage(`Verbinde mit Nextcloud: ${project.name}...`);
+      setUploadMessage(`Sende zu Nextcloud (${project.name})...`);
       await nextcloudService.uploadDiaryEntry(project, entry, pdfBlob);
       localStorage.removeItem(DRAFT_KEY);
       setStatus({ step: 'success' });
     } catch (error: any) {
       console.error("Upload Error:", error);
-      setUploadError(error.message || "Unbekannter Netzwerkfehler");
+      setUploadError(error.message || "Netzwerkfehler");
     }
   };
 
@@ -320,23 +258,19 @@ export default function App() {
                     <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                 </div>
                 <h2 className="text-xl font-bold text-gray-900 mb-2">Upload fehlgeschlagen</h2>
-                <p className="text-sm text-gray-500 mb-6 leading-relaxed">Der Bericht konnte nicht an die Nextcloud übertragen werden. Mögliche Ursache: Fehlende .htaccess-Berechtigung (CORS) oder kein Internet.</p>
-                <div className="bg-red-50 p-3 rounded-lg mb-6 border border-red-100 text-[10px] font-mono text-red-800 text-left overflow-x-auto">
-                    Fehler: {uploadError}
-                </div>
+                <p className="text-sm text-gray-500 mb-6">Der Bericht konnte nicht hochgeladen werden (z.B. keine Berechtigung oder kein Internet).</p>
                 <div className="space-y-3">
-                    <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_Backup_${entry.date}.pdf`)} className="w-full py-3 flex items-center justify-center bg-brand-600 hover:bg-brand-700">
-                        <DownloadIcon /> PDF manuell speichern
+                    <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_Backup_${entry.date}.pdf`)} className="w-full py-3 flex items-center justify-center bg-brand-600">
+                        <DownloadIcon /> PDF manuell sichern
                     </Button>
-                    <button onClick={() => setStatus({ step: 'form' })} className="text-sm text-brand-600 font-bold hover:underline">Zurück zum Formular</button>
+                    <button onClick={() => setStatus({ step: 'form' })} className="text-sm text-brand-600 font-bold">Zurück zum Formular</button>
                 </div>
             </div>
         ) : (
-            <>
-                <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-brand-600 mb-4"></div>
-                <h2 className="text-xl font-semibold text-brand-900">Bitte warten</h2>
-                <p className="text-gray-500 mt-2">{uploadMessage}</p>
-            </>
+            <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-brand-600 mx-auto mb-4"></div>
+                <p className="text-gray-600 font-medium">{uploadMessage}</p>
+            </div>
         )}
       </div>
     );
@@ -350,12 +284,12 @@ export default function App() {
             <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
           </div>
           <h2 className="text-2xl font-bold text-brand-900 mb-2">Erfolgreich!</h2>
-          <p className="text-gray-600 mb-8 leading-relaxed">Bericht wurde erfolgreich in die Nextcloud hochgeladen und archiviert.</p>
+          <p className="text-gray-600 mb-8">Der Bericht wurde übertragen.</p>
           <div className="space-y-3">
-             <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_${entry.date}.pdf`)} variant="outline" className="w-full py-3 flex items-center justify-center">
-                 <DownloadIcon /> Bericht als PDF lokal kopieren
+             <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_${entry.date}.pdf`)} variant="outline" className="w-full">
+                 <DownloadIcon /> Als PDF lokal kopieren
              </Button>
-             <Button onClick={resetForm} className="w-full py-3 font-bold">Neuer Eintrag</Button>
+             <Button onClick={resetForm} className="w-full">Neuer Eintrag</Button>
           </div>
         </div>
       </div>
@@ -364,49 +298,56 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20 relative font-sans">
-      {draftRestored && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-full text-sm shadow-lg z-50 animate-bounce">Entwurf wiederhergestellt</div>}
-
-      <div className="sticky top-0 z-20 bg-white shadow-md border-b border-brand-100 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center flex-1 overflow-hidden mr-4">
-             <Logo className="h-10 md:h-14 w-auto shrink-0" src={config.logo} />
-             <span className="ml-4 font-bold text-brand-900 hidden lg:block text-xl border-l-2 border-brand-200 pl-4 truncate">Bautagebuch</span>
+      <div className="sticky top-0 z-20 bg-white shadow-sm border-b px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center flex-1 overflow-hidden">
+             <Logo className="h-10 md:h-12 w-auto shrink-0" src={config.logo} />
+             <span className="ml-4 font-bold text-brand-900 hidden sm:block text-lg border-l pl-4 truncate">Bautagebuch</span>
         </div>
         <div className="flex gap-2 shrink-0">
-            {currentUser?.role === 'admin' && <button onClick={() => setShowSettings(true)} className="p-2 text-brand-600 hover:bg-brand-50 rounded-full transition-colors"><SettingsIcon /></button>}
-            {currentUser && <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-600 rounded-full transition-colors"><LogoutIcon /></button>}
+            {currentUser?.role === 'admin' && (
+                <button onClick={() => setShowSettings(true)} className="p-2 text-brand-600 hover:bg-brand-50 rounded-full">
+                    <SettingsIcon />
+                </button>
+            )}
+            {currentUser && <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-600 rounded-full"><LogoutIcon /></button>}
         </div>
       </div>
 
       {!currentUser ? (
-          <div className="max-w-md mx-auto mt-16 p-6 text-center">
-              <Logo className="h-24 md:h-32 mx-auto mb-10 drop-shadow-sm" src={config.logo} />
+          <div className="max-w-md mx-auto mt-16 p-6">
+              <Logo className="h-24 mx-auto mb-10" src={config.logo} />
               <div className="bg-white rounded-2xl shadow-xl p-8 border-t-4 border-brand-600">
-                  <h2 className="text-xl font-bold text-brand-900 mb-6 uppercase tracking-tight">Anmeldung</h2>
+                  <h2 className="text-xl font-bold text-center text-brand-900 mb-6 uppercase">Login</h2>
                   <form onSubmit={handleLogin} className="space-y-4">
-                      <input type="text" value={loginCode} onChange={e => setLoginCode(e.target.value)} placeholder="Kürzel" className="w-full text-center text-xl p-3 border rounded-lg uppercase outline-none focus:ring-2 focus:ring-brand-200 transition-all" />
-                      <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="Passwort" className="w-full text-center text-xl p-3 border rounded-lg outline-none focus:ring-2 focus:ring-brand-200 transition-all" />
+                      <input type="text" value={loginCode} onChange={e => setLoginCode(e.target.value)} placeholder="Techniker Kürzel" className="w-full text-center text-xl p-3 border rounded-lg uppercase outline-none focus:ring-2 focus:ring-brand-100" />
+                      <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="Passwort" className="w-full text-center text-xl p-3 border rounded-lg outline-none focus:ring-2 focus:ring-brand-100" />
                       <Button type="submit" className="w-full py-4 text-lg font-bold">Anmelden</Button>
                   </form>
               </div>
           </div>
       ) : (
-        <div className="max-w-3xl mx-auto p-4 md:p-6 lg:p-8">
-            <form onSubmit={handleSubmit} className="space-y-8 bg-white p-6 md:p-8 rounded-xl shadow-lg border border-gray-100">
+        <div className="max-w-3xl mx-auto p-4 md:p-8">
+            <form onSubmit={handleSubmit} className="space-y-8 bg-white p-6 md:p-8 rounded-xl shadow-lg border">
                 <div className="border-b pb-4 flex justify-between items-start">
                     <div>
                         <h2 className="text-2xl font-bold text-brand-900">Tagesbericht</h2>
-                        <p className="text-gray-500 text-sm">Techniker: {currentUser.name}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-gray-500 text-sm">{currentUser.name}</span>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${currentUser.role === 'admin' ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
+                                {currentUser.role}
+                            </span>
+                        </div>
                     </div>
-                    <button type="button" onClick={handleManualPdfDownload} disabled={isGeneratingPdfOnly} className="text-brand-600 hover:bg-brand-50 px-3 py-1.5 rounded-lg border border-brand-200 text-xs font-bold flex items-center transition-colors">
-                        {isGeneratingPdfOnly ? "Generiert..." : <><DownloadIcon /> PDF / Vorschau</>}
+                    <button type="button" onClick={handleManualPdfDownload} disabled={isGeneratingPdfOnly} className="text-brand-600 hover:bg-brand-50 px-3 py-1.5 rounded-lg border border-brand-100 text-xs font-bold flex items-center">
+                        {isGeneratingPdfOnly ? "Lädt..." : <><DownloadIcon /> Vorschau / PDF</>}
                     </button>
                 </div>
 
                 <div className="grid gap-6">
                     <div>
-                        <label className="block text-sm font-bold text-brand-800 mb-1">Projekt</label>
-                        <select value={selectedProjectIndex} onChange={(e) => setSelectedProjectIndex(Number(e.target.value))} required className="block w-full rounded-lg border-gray-300 p-3 border bg-gray-50 focus:ring-2 focus:ring-brand-200 transition-all">
-                            <option value={-1} disabled>Wählen...</option>
+                        <label className="block text-sm font-bold text-brand-800 mb-1">Projekt auswählen</label>
+                        <select value={selectedProjectIndex} onChange={(e) => setSelectedProjectIndex(Number(e.target.value))} required className="block w-full rounded-lg border-gray-300 p-3 border bg-gray-50 focus:ring-2 focus:ring-brand-100">
+                            <option value={-1} disabled>Bitte wählen...</option>
                             {config.projects.map((p, idx) => <option key={idx} value={idx}>{p.name}</option>)}
                         </select>
                     </div>
@@ -417,8 +358,8 @@ export default function App() {
                             <input type="date" required value={entry.date} onChange={e => setEntry({...entry, date: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border" />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Standort / Adresse</label>
-                            <input type="text" required placeholder="Ort, Straße" value={entry.location} onChange={e => setEntry({...entry, location: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border" />
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Standort / Straße</label>
+                            <input type="text" required placeholder="Ort, Straße..." value={entry.location} onChange={e => setEntry({...entry, location: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border" />
                         </div>
                     </div>
 
@@ -442,157 +383,151 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className="bg-brand-50 p-4 rounded-xl border border-brand-100 shadow-inner">
+                <div className="bg-brand-50 p-4 rounded-xl border border-brand-100">
                     <div className="flex justify-between items-center mb-2">
-                        <label className="block text-sm font-bold text-brand-800">Erledigte Arbeiten</label>
+                        <label className="block text-sm font-bold text-brand-800">Tätigkeitsbericht</label>
                         <button type="button" onClick={async () => {
-                            if (entry.images.length === 0) return alert("Fotos fehlen für die KI.");
+                            if (entry.images.length === 0) return alert("Zuerst Fotos machen.");
                             setIsAnalyzingImages(true);
                             try {
                                 const text = await geminiService.analyzeImagesForReport(entry.images, entry.activityType);
                                 setEntry(prev => ({ ...prev, description: prev.description ? prev.description + "\n" + text : text }));
                             } finally { setIsAnalyzingImages(false); }
-                        }} className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded-full flex items-center shadow-md hover:bg-brand-700 transition-colors">
-                            {isAnalyzingImages ? "KI analysiert..." : <><PhotoSparklesIcon /> KI-Bericht</>}
+                        }} className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded-full flex items-center shadow-sm hover:bg-brand-700">
+                            {isAnalyzingImages ? "KI analysiert..." : <><PhotoSparklesIcon /> KI-Unterstützung</>}
                         </button>
                     </div>
-                    <textarea rows={6} required placeholder="Geben Sie hier Ihre Tätigkeitsbeschreibung ein..." value={entry.description} onChange={e => setEntry({...entry, description: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border focus:ring-2 focus:ring-brand-200 transition-all" />
+                    <textarea rows={6} required placeholder="Was wurde heute erledigt?" value={entry.description} onChange={e => setEntry({...entry, description: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border focus:ring-2 focus:ring-brand-100" />
                 </div>
 
-                <div className="border border-gray-200 p-4 rounded-xl bg-gray-50/50">
+                <div className="border p-4 rounded-xl bg-gray-50/50">
                     <label className="block text-sm font-bold text-brand-800 mb-3">Materialliste</label>
                     <div className="flex gap-2 mb-4">
                         <input type="text" placeholder="Material" value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} className="flex-1 p-2 border rounded-lg text-sm" />
                         <input type="text" placeholder="Menge" value={materialInput.amount} onChange={e => setMaterialInput({ ...materialInput, amount: e.target.value })} className="w-24 p-2 border rounded-lg text-sm" />
-                        <button type="button" onClick={addMaterial} className="p-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors"><PlusIcon /></button>
+                        <button type="button" onClick={() => {
+                            if (!materialInput.name || !materialInput.amount) return;
+                            setEntry(prev => ({ ...prev, materials: [...prev.materials, { ...materialInput }] }));
+                            setMaterialInput({ name: '', amount: '' });
+                        }} className="p-2 bg-brand-600 text-white rounded-lg"><PlusIcon /></button>
                     </div>
                     <div className="space-y-2">
                         {entry.materials.map((m, idx) => (
-                            <div key={idx} className="flex justify-between items-center bg-white p-2 rounded-lg border border-gray-200 text-sm shadow-sm">
+                            <div key={idx} className="flex justify-between items-center bg-white p-2 rounded-lg border text-sm shadow-sm">
                                 <span><span className="font-bold text-brand-700">{m.amount}</span> - {m.name}</span>
-                                <button type="button" onClick={() => removeMaterial(idx)} className="text-red-500 hover:text-red-700 transition-colors"><TrashIcon /></button>
+                                <button type="button" onClick={() => setEntry(prev => ({ ...prev, materials: prev.materials.filter((_, i) => i !== idx) }))} className="text-red-500"><TrashIcon /></button>
                             </div>
                         ))}
                     </div>
                 </div>
 
                 <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-3">Fotos ({entry.images.length})</label>
+                    <label className="block text-sm font-bold text-gray-700 mb-3">Fotodokumentation ({entry.images.length})</label>
                     <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
                         {entry.images.map((f, i) => (
-                            <div key={i} className="relative aspect-square border rounded-lg overflow-hidden group border-gray-200 shadow-sm">
+                            <div key={i} className="relative aspect-square border rounded-lg overflow-hidden group shadow-sm">
                                 <img src={URL.createObjectURL(f)} className="w-full h-full object-cover" />
-                                <button type="button" onClick={() => setEntry({...entry, images: entry.images.filter((_, idx) => idx !== i)})} className="absolute top-0 right-0 bg-red-500 text-white p-1 rounded-bl opacity-0 group-hover:opacity-100 transition-opacity"><TrashIcon /></button>
+                                <button type="button" onClick={() => setEntry({...entry, images: entry.images.filter((_, idx) => idx !== i)})} className="absolute top-0 right-0 bg-red-500 text-white p-1 rounded-bl opacity-0 group-hover:opacity-100"><TrashIcon /></button>
                             </div>
                         ))}
-                        <label className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 hover:border-brand-400 transition-all">
+                        <label className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-all">
                             <CameraIcon />
-                            <span className="text-[10px] text-gray-400 mt-1">Kamera</span>
+                            <span className="text-[10px] text-gray-400 mt-1">Foto</span>
                             <input type="file" accept="image/*" capture="environment" multiple onChange={e => e.target.files && setEntry({...entry, images: [...entry.images, ...Array.from(e.target.files)]})} className="hidden" />
                         </label>
                     </div>
                 </div>
 
-                <div className="pt-6 border-t flex flex-col gap-3">
-                    <Button type="submit" className="w-full py-4 text-xl font-bold shadow-xl">Bericht Absenden</Button>
-                    <p className="text-[10px] text-center text-gray-400 italic">Bericht wird als PDF archiviert.</p>
+                <div className="pt-6 border-t">
+                    <Button type="submit" className="w-full py-4 text-xl font-bold shadow-lg">Bericht Absenden</Button>
                 </div>
             </form>
         </div>
       )}
 
-      {showSettings && (
+      {showSettings && currentUser?.role === 'admin' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
             <div className="bg-white rounded-2xl p-6 w-full max-w-6xl max-h-[90vh] overflow-y-auto shadow-2xl">
                 <div className="flex justify-between items-center mb-6 border-b pb-4">
-                    <h3 className="text-2xl font-bold text-brand-900">System-Verwaltung</h3>
-                    <button onClick={() => { setShowSettings(false); setEditingTechId(null); }} className="p-2 text-gray-500 hover:text-gray-800 transition-colors"><CloseIcon /></button>
+                    <h3 className="text-2xl font-bold text-brand-900">Administration</h3>
+                    <button onClick={() => { setShowSettings(false); setEditingTechId(null); }} className="p-2 text-gray-500 hover:text-gray-800"><CloseIcon /></button>
                 </div>
                 
                 <div className="grid lg:grid-cols-3 gap-8">
-                    {/* 1. Logo Verwaltung */}
+                    {/* Firmenlogo */}
                     <div className="space-y-4">
-                        <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Corporate Identity</h4>
-                        <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 text-center">
-                            <label className="block text-xs font-bold text-gray-500 mb-4 uppercase">Aktuelles Firmenlogo</label>
-                            <div className="flex justify-center mb-6 bg-white p-4 rounded-lg border border-dashed border-gray-300 min-h-[100px] items-center">
+                        <h4 className="text-xs font-bold uppercase text-brand-600">Logo & Design</h4>
+                        <div className="bg-gray-50 p-6 rounded-xl border text-center">
+                            <div className="flex justify-center mb-6 bg-white p-4 rounded-lg border border-dashed items-center min-h-[120px]">
                                 <Logo className="h-20 w-auto" src={config.logo} />
                             </div>
-                            <div className="space-y-3">
-                                <label className="block w-full py-2 px-4 bg-brand-600 text-white rounded-lg cursor-pointer hover:bg-brand-700 transition-all text-sm font-bold">
-                                    Logo hochladen
-                                    <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
-                                </label>
-                                {config.logo && (
-                                    <button onClick={() => saveConfig({ ...config, logo: undefined })} className="text-xs text-red-500 font-bold hover:underline">Logo zurücksetzen (Standard)</button>
-                                )}
-                            </div>
-                            <p className="text-[10px] text-gray-400 mt-4 leading-tight italic">Empfohlen: PNG oder SVG mit transparentem Hintergrund.</p>
+                            <label className="block w-full py-2 px-4 bg-brand-600 text-white rounded-lg cursor-pointer hover:bg-brand-700 text-sm font-bold mb-2">
+                                Neues Logo hochladen
+                                <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                            </label>
+                            {config.logo && (
+                                <button onClick={() => saveConfig({ ...config, logo: undefined })} className="text-[10px] text-red-500 font-bold uppercase tracking-wider">Logo zurücksetzen</button>
+                            )}
                         </div>
                     </div>
 
-                    {/* 2. Projekte Verwaltung */}
+                    {/* Projekte */}
                     <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                             <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Projekte</h4>
-                             <button onClick={() => setShowHelp(!showHelp)} className="text-brand-500 hover:text-brand-700 flex items-center gap-1 text-xs font-bold bg-brand-50 px-2 py-1 rounded-full transition-colors">
-                                <InfoIcon /> Hilfe
-                             </button>
-                        </div>
-                        {showHelp && (
-                            <div className="bg-blue-50 p-4 rounded-xl text-xs leading-relaxed text-blue-900 border border-blue-200">
-                                <p className="font-bold mb-1">IONOS Nextcloud Fix:</p>
-                                <p className="mb-2">Füge in die .htaccess deiner Nextcloud ein:</p>
-                                <code className="block bg-white p-1 rounded text-[10px] truncate mb-2">{currentAppDomain}</code>
-                                <Button onClick={() => copyToClipboard(`<IfModule mod_headers.c>\n  SetEnvIf Origin "${currentAppDomain}" APP_ORIGIN=$0\n  Header set Access-Control-Allow-Origin %{APP_ORIGIN}e env=APP_ORIGIN\n  Header set Access-Control-Allow-Methods "GET, POST, OPTIONS, PUT, MKCOL"\n  Header set Access-Control-Allow-Headers "Authorization, Content-Type, Origin"\n</IfModule>`)} variant="primary" className="w-full py-1 text-[10px]">Code kopieren</Button>
-                            </div>
-                        )}
-                        <div className="space-y-2 mb-4 max-h-48 overflow-y-auto border rounded-lg p-3 bg-gray-50">
+                        <h4 className="text-xs font-bold uppercase text-brand-600">Projekte (Nextcloud)</h4>
+                        <div className="space-y-2 mb-4 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
                             {config.projects.map(p => (
-                                <div key={p.token} className="flex justify-between items-center p-3 bg-white rounded-lg border border-gray-100 text-sm shadow-sm">
-                                    <span className="font-medium truncate mr-2">{p.name}</span>
-                                    <button onClick={() => saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)})} className="text-red-400 hover:text-red-600"><TrashIcon /></button>
+                                <div key={p.token} className="flex justify-between items-center p-2 bg-white rounded border text-sm shadow-sm">
+                                    <span className="font-medium truncate">{p.name}</span>
+                                    <button onClick={() => saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)})} className="text-red-400"><TrashIcon /></button>
                                 </div>
                             ))}
                         </div>
-                        <div className="space-y-3 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                            <input placeholder="Name" value={newProjName} onChange={e => setNewProjName(e.target.value)} className="w-full p-2 border rounded-lg text-sm" />
-                            <input placeholder="Link" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="w-full p-2 border rounded-lg text-sm" />
+                        <div className="space-y-2 bg-white p-3 rounded-lg border shadow-sm">
+                            <input placeholder="Ortsname" value={newProjName} onChange={e => setNewProjName(e.target.value)} className="w-full p-2 border rounded text-sm" />
+                            <input placeholder="Share-Link" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="w-full p-2 border rounded text-sm" />
                             <Button onClick={() => {
                                 const token = newProjLink.split('/s/')[1]?.split('/')[0];
-                                if (!token || !newProjName) return alert("Pflichtfelder!");
+                                if (!token || !newProjName) return alert("Ungültige Daten.");
                                 saveConfig({...config, projects: [...config.projects, { name: newProjName, link: newProjLink, token }]});
                                 setNewProjName(''); setNewProjLink('');
-                            }} className="w-full">Projekt +</Button>
+                            }} className="w-full">Hinzufügen</Button>
                         </div>
                     </div>
 
-                    {/* 3. Techniker Verwaltung */}
+                    {/* Technikerverwaltung */}
                     <div className="space-y-4">
-                        <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Techniker</h4>
-                        <div className="space-y-2 mb-4 max-h-80 overflow-y-auto border rounded-lg p-3 bg-gray-50">
+                        <h4 className="text-xs font-bold uppercase text-brand-600">Techniker & Passwörter</h4>
+                        <div className="space-y-2 mb-4 max-h-64 overflow-y-auto border rounded-lg p-2 bg-gray-50">
                             {config.technicians.map(t => (
-                                <div key={t.id} className={`flex flex-col p-3 bg-white rounded-lg border text-sm shadow-sm ${editingTechId === t.id ? 'border-brand-500 bg-brand-50/20' : 'border-gray-100'}`}>
+                                <div key={t.id} className={`flex flex-col p-2 bg-white rounded border text-sm shadow-sm ${editingTechId === t.id ? 'border-brand-500 bg-brand-50' : 'border-gray-100'}`}>
                                     {editingTechId === t.id ? (
                                         <div className="space-y-2">
-                                            <input value={editTechName} onChange={e => setEditTechName(e.target.value)} className="w-full p-1 border rounded text-xs" />
-                                            <input value={editTechCode} onChange={e => setEditTechCode(e.target.value)} className="w-full p-1 border rounded text-xs uppercase" />
-                                            <input value={editTechPass} onChange={e => setEditTechPass(e.target.value)} className="w-full p-1 border rounded text-xs" />
-                                            <div className="flex justify-end gap-2 pt-2">
-                                                <button onClick={() => setEditingTechId(null)} className="p-1 text-gray-400"><CloseIcon /></button>
-                                                <button onClick={saveEditedTech} className="p-1 text-green-500"><CheckIcon /></button>
+                                            <input value={editTechName} onChange={e => setEditTechName(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Name" />
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <input value={editTechCode} onChange={e => setEditTechCode(e.target.value)} className="w-full p-1 border rounded text-xs uppercase" placeholder="Kürzel" />
+                                                <input value={editTechPass} onChange={e => setEditTechPass(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Passwort" />
+                                            </div>
+                                            <div className="flex justify-between items-center pt-1">
+                                                <select value={editTechRole} onChange={e => setEditTechRole(e.target.value as any)} className="text-[10px] p-1 border rounded">
+                                                    <option value="user">User</option>
+                                                    <option value="admin">Admin</option>
+                                                </select>
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => setEditingTechId(null)} className="text-gray-400 hover:text-gray-600"><CloseIcon /></button>
+                                                    <button onClick={saveEditedTech} className="text-green-500 hover:text-green-700"><CheckIcon /></button>
+                                                </div>
                                             </div>
                                         </div>
                                     ) : (
                                         <div className="flex justify-between items-center">
-                                            <div>
+                                            <div className="truncate">
                                                 <span className="font-bold text-brand-700">[{t.code}]</span> {t.name}
-                                                <p className="text-[10px] text-gray-400">PW: {t.password}</p>
+                                                <p className="text-[9px] text-gray-400">Rolle: {t.role} | PW: {t.password}</p>
                                             </div>
                                             <div className="flex gap-1">
-                                                <button onClick={() => startEditingTech(t)} className="p-1.5 text-brand-400 hover:text-brand-600"><EditIcon /></button>
+                                                <button onClick={() => startEditingTech(t)} className="p-1 text-brand-400 hover:text-brand-600"><EditIcon /></button>
                                                 {t.id !== currentUser?.id && (
-                                                    <button onClick={() => saveConfig({...config, technicians: config.technicians.filter(tech => tech.id !== t.id)})} className="p-1.5 text-red-300 hover:text-red-500"><TrashIcon /></button>
+                                                    <button onClick={() => saveConfig({...config, technicians: config.technicians.filter(tech => tech.id !== t.id)})} className="p-1 text-red-300 hover:text-red-500"><TrashIcon /></button>
                                                 )}
                                             </div>
                                         </div>
@@ -600,23 +535,28 @@ export default function App() {
                                 </div>
                             ))}
                         </div>
-                        <div className="bg-gray-100 p-4 rounded-xl">
-                            <input placeholder="Name" value={newTechName} onChange={e => setNewTechName(e.target.value)} className="w-full p-2 border rounded-lg text-sm mb-2" />
+                        <div className="bg-gray-100 p-3 rounded-lg border">
+                            <h5 className="text-[10px] font-bold text-gray-500 uppercase mb-2">Neu anlegen</h5>
+                            <input placeholder="Name" value={newTechName} onChange={e => setNewTechName(e.target.value)} className="w-full p-2 border rounded text-xs mb-2 shadow-inner" />
                             <div className="grid grid-cols-2 gap-2 mb-2">
-                                <input placeholder="Kürzel" value={newTechCode} onChange={e => setNewTechCode(e.target.value)} className="w-full p-2 border rounded-lg text-sm uppercase" />
-                                <input placeholder="Passwort" value={newTechPass} onChange={e => setNewTechPass(e.target.value)} className="w-full p-2 border rounded-lg text-sm" />
+                                <input placeholder="Kürzel" value={newTechCode} onChange={e => setNewTechCode(e.target.value)} className="w-full p-2 border rounded text-xs uppercase" />
+                                <input placeholder="Passwort" value={newTechPass} onChange={e => setNewTechPass(e.target.value)} className="w-full p-2 border rounded text-xs" />
                             </div>
+                            <select value={newTechRole} onChange={e => setNewTechRole(e.target.value as any)} className="w-full p-2 border rounded text-xs bg-white mb-2 shadow-inner">
+                                <option value="user">Techniker (User)</option>
+                                <option value="admin">Administrator</option>
+                            </select>
                             <Button onClick={() => {
-                                if (!newTechName || !newTechCode) return alert("Pflichtfelder!");
-                                saveConfig({...config, technicians: [...config.technicians, { id: Date.now().toString(), name: newTechName, code: newTechCode.toUpperCase(), password: newTechPass, role: 'user' }]});
+                                if (!newTechName || !newTechCode) return alert("Felder füllen.");
+                                saveConfig({...config, technicians: [...config.technicians, { id: Date.now().toString(), name: newTechName, code: newTechCode.toUpperCase(), password: newTechPass, role: newTechRole }]});
                                 setNewTechName(''); setNewTechCode(''); setNewTechPass('');
-                            }} variant="secondary" className="w-full">Nutzer +</Button>
+                            }} variant="secondary" className="w-full py-1 text-xs">Techniker hinzufügen</Button>
                         </div>
                     </div>
                 </div>
                 
-                <div className="pt-8 mt-10 border-t flex justify-between items-center">
-                    <p className="text-[10px] text-gray-400 italic">Bautagebuch v1.2.0 (Custom Branding Support)</p>
+                <div className="pt-6 mt-8 border-t flex justify-between items-center">
+                    <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Verwaltungskonsole v1.2.5</p>
                     <Button variant="outline" onClick={() => { setShowSettings(false); setEditingTechId(null); }}>Schließen</Button>
                 </div>
             </div>
