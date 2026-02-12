@@ -2,13 +2,50 @@
 import { jsPDF } from "jspdf";
 import { DiaryEntry } from "../types";
 
-// Helper to convert File to Base64 for PDF embedding
-const fileToBase64 = (file: File): Promise<string> => {
+// Helper to convert any browser-supported image File to a PDF-compatible Base64 JPEG
+// This ensures that formats like WebP or others are correctly processed.
+const fileToPdfImage = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        // Create a canvas to normalize the image (fixes orientation and format issues)
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(e.target?.result as string); // Fallback to raw base64
+          return;
+        }
+
+        // Set dimensions (cap size for PDF performance and to prevent memory crashes)
+        const maxDim = 1200;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height *= maxDim / width;
+            width = maxDim;
+          } else {
+            width *= maxDim / height;
+            height = maxDim;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx.fillStyle = "white"; // Background for transparent images
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Export as JPEG with good quality
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.onerror = () => reject(new Error("Bild konnte nicht geladen werden"));
+      img.src = e.target?.result as string;
+    };
     reader.onerror = error => reject(error);
+    reader.readAsDataURL(file);
   });
 };
 
@@ -122,9 +159,8 @@ export const generateDiaryPdf = async (
     yPos += 10;
   }
 
-  // --- Photos Section (Grid 2x4) ---
+  // --- Photos Section (Grid 2x4, max 8 per page) ---
   if (entry.images.length > 0) {
-    // Start images on a clean page for the grid
     doc.addPage();
     yPos = 20;
     yPos = drawSectionHeader("Fotodokumentation", yPos);
@@ -134,15 +170,14 @@ export const generateDiaryPdf = async (
     const horizontalGap = 8;
     const verticalGap = 8;
     const imgWidth = (contentWidth - horizontalGap) / cols;
-    const imgHeight = 52; // Fixe Höhe für das Grid-Element (ca. 4 Reihen passen)
+    const imgHeight = 52; 
     const labelHeight = 6;
     const blockHeight = imgHeight + labelHeight;
 
     for (let i = 0; i < entry.images.length; i++) {
-        // Berechne Index auf aktueller Seite (0-7)
         const imageIndexOnPage = i % 8;
         
-        // Wenn 8 Bilder erreicht sind, neue Seite (außer bei dem allerletzten Bild)
+        // Start a new page if we reached 8 images
         if (i > 0 && imageIndexOnPage === 0) {
             doc.addPage();
             yPos = 20;
@@ -157,20 +192,26 @@ export const generateDiaryPdf = async (
         const y = yPos + (row * (blockHeight + verticalGap));
 
         try {
-            const base64Img = await fileToBase64(entry.images[i]);
+            // Use the robust converter to ensure PDF compatibility for all formats
+            const base64Img = await fileToPdfImage(entry.images[i]);
             const imgProps = doc.getImageProperties(base64Img);
             
-            // Header für das Bild (Index & Dateiname)
+            // Image Label (allows original filenames)
             doc.setFillColor(248, 248, 248);
             doc.setDrawColor(220, 220, 220);
             doc.rect(x, y, imgWidth, labelHeight, 'FD');
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(7);
+            doc.setFontSize(6.5);
             doc.setTextColor(120, 120, 120);
-            const fileName = entry.images[i].name.length > 25 ? entry.images[i].name.substring(0, 22) + "..." : entry.images[i].name;
-            doc.text(`${i + 1}: ${fileName}`, x + 2, y + 4.5);
+            
+            // Truncate filename gracefully if too long for the box
+            let displayTitle = `${i + 1}: ${entry.images[i].name}`;
+            if (doc.getTextWidth(displayTitle) > imgWidth - 4) {
+               displayTitle = doc.splitTextToSize(displayTitle, imgWidth - 4)[0] + "...";
+            }
+            doc.text(displayTitle, x + 2, y + 4);
 
-            // Bild skalieren und zentrieren innerhalb des Grid-Feldes
+            // Calculate scaling for centering
             const ratio = imgProps.width / imgProps.height;
             let renderWidth = imgWidth;
             let renderHeight = renderWidth / ratio;
@@ -183,8 +224,8 @@ export const generateDiaryPdf = async (
             const offsetX = (imgWidth - renderWidth) / 2;
             const offsetY = (imgHeight - renderHeight) / 2;
 
-            // Rahmen um den Bildbereich
-            doc.setDrawColor(240, 240, 240);
+            // Optional subtle background/border for the image area
+            doc.setDrawColor(245, 245, 245);
             doc.rect(x, y + labelHeight, imgWidth, imgHeight);
 
             doc.addImage(
@@ -193,7 +234,9 @@ export const generateDiaryPdf = async (
                 x + offsetX, 
                 y + labelHeight + offsetY, 
                 renderWidth, 
-                renderHeight
+                renderHeight,
+                undefined,
+                'FAST'
             );
 
         } catch (e) {
@@ -205,7 +248,7 @@ export const generateDiaryPdf = async (
     }
   }
 
-  // --- Globaler Footer Pass ---
+  // --- Global Footer Pass ---
   const totalPages = doc.internal.pages.length - 1;
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
