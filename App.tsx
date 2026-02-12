@@ -21,9 +21,15 @@ const PhotoSparklesIcon = () => (
     </svg>
 );
 
+const DownloadIcon = () => (
+    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+    </svg>
+);
+
 const SettingsIcon = () => (
   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
   </svg>
 );
@@ -82,6 +88,7 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [status, setStatus] = useState<FormStatus>({ step: 'login' });
   const [uploadMessage, setUploadMessage] = useState("Daten werden hochgeladen...");
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
   const [lastGeneratedPdf, setLastGeneratedPdf] = useState<Blob | null>(null);
 
@@ -116,6 +123,7 @@ export default function App() {
   });
   
   const [isAnalyzingImages, setIsAnalyzingImages] = useState(false);
+  const [isGeneratingPdfOnly, setIsGeneratingPdfOnly] = useState(false);
 
   // Die Domain dieser Web-App
   const currentAppDomain = window.location.origin;
@@ -202,6 +210,32 @@ export default function App() {
 
   const handleLogout = () => { setCurrentUser(null); setStatus({ step: 'login' }); setShowSettings(false); };
 
+  const downloadBlob = (blob: Blob, filename: string) => {
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+  };
+
+  const handleManualPdfDownload = async () => {
+      setIsGeneratingPdfOnly(true);
+      try {
+          const project = config.projects[selectedProjectIndex] || { name: 'Entwurf' };
+          const logoBase64 = await getLogoAsBase64();
+          const pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
+          const filename = `Bautagebuch_${entry.date}_${entry.location.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+          downloadBlob(pdfBlob, filename);
+      } catch (err) {
+          alert("PDF-Generierung fehlgeschlagen.");
+      } finally {
+          setIsGeneratingPdfOnly(false);
+      }
+  };
+
   const startEditingTech = (tech: Technician) => {
     setEditingTechId(tech.id);
     setEditTechName(tech.name);
@@ -212,53 +246,28 @@ export default function App() {
 
   const saveEditedTech = () => {
     if (!editTechName || !editTechCode) return alert("Name und Kürzel sind Pflichtfelder.");
-    
     const updatedTechs = config.technicians.map(t => 
         t.id === editingTechId 
             ? { ...t, name: editTechName, code: editTechCode.toUpperCase(), password: editTechPass, role: editTechRole } 
             : t
     );
-    
     saveConfig({ ...config, technicians: updatedTechs });
     setEditingTechId(null);
   };
 
   const addMaterial = () => {
     if (!materialInput.name || !materialInput.amount) return;
-    setEntry(prev => ({
-        ...prev,
-        materials: [...prev.materials, { ...materialInput }]
-    }));
+    setEntry(prev => ({ ...prev, materials: [...prev.materials, { ...materialInput }] }));
     setMaterialInput({ name: '', amount: '' });
   };
 
   const removeMaterial = (index: number) => {
-    setEntry(prev => ({
-        ...prev,
-        materials: prev.materials.filter((_, i) => i !== index)
-    }));
+    setEntry(prev => ({ ...prev, materials: prev.materials.filter((_, i) => i !== index) }));
   };
 
   const copyToClipboard = (text: string) => {
-      const fallback = () => {
-          const el = document.createElement('textarea');
-          el.value = text;
-          document.body.appendChild(el);
-          el.select();
-          document.execCommand('copy');
-          document.body.removeChild(el);
-          alert("Code kopiert!");
-      };
-
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(text).then(() => {
-              alert("Code kopiert!");
-          }).catch((err) => {
-              console.error("Clipboard write failed", err);
-              fallback();
-          });
-      } else {
-          fallback();
+      if (navigator.clipboard) {
+          navigator.clipboard.writeText(text).then(() => alert("Kopiert!"));
       }
   };
 
@@ -266,6 +275,7 @@ export default function App() {
     e.preventDefault();
     if (selectedProjectIndex === -1) { alert("Bitte ein Projekt auswählen."); return; }
     const project = config.projects[selectedProjectIndex];
+    setUploadError(null);
     try {
       setStatus({ step: 'uploading' });
       setUploadMessage("Generiere PDF-Bericht...");
@@ -273,13 +283,14 @@ export default function App() {
       const pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
       setLastGeneratedPdf(pdfBlob); 
       
-      setUploadMessage(`Lade hoch zu: ${project.name}...`);
+      setUploadMessage(`Verbinde mit Nextcloud: ${project.name}...`);
       await nextcloudService.uploadDiaryEntry(project, entry, pdfBlob);
       localStorage.removeItem(DRAFT_KEY);
       setStatus({ step: 'success' });
     } catch (error: any) {
       console.error("Upload Error:", error);
-      setStatus({ step: 'form', message: `Upload fehlgeschlagen: ${error.message}` });
+      setUploadError(error.message || "Unbekannter Netzwerkfehler");
+      // Wir bleiben im State 'uploading', aber zeigen den Fehler an.
     }
   };
 
@@ -288,14 +299,36 @@ export default function App() {
     setEntry({...entry, images: [], description: '', missingWork: '', materials: [], location: ''}); 
     setStatus({ step: 'form' }); 
     setLastGeneratedPdf(null); 
+    setUploadError(null);
   };
 
   if (status.step === 'uploading') {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-brand-600 mb-4"></div>
-        <h2 className="text-xl font-semibold text-brand-900">Bitte warten</h2>
-        <p className="text-gray-500 mt-2">{uploadMessage}</p>
+        {uploadError ? (
+            <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center border-t-4 border-red-500">
+                <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-red-100 mb-6 text-red-600">
+                    <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                </div>
+                <h2 className="text-xl font-bold text-gray-900 mb-2">Upload fehlgeschlagen</h2>
+                <p className="text-sm text-gray-500 mb-6 leading-relaxed">Der Bericht konnte nicht an die Nextcloud übertragen werden. Mögliche Ursache: Fehlende .htaccess-Berechtigung (CORS) oder kein Internet.</p>
+                <div className="bg-red-50 p-3 rounded-lg mb-6 border border-red-100 text-[10px] font-mono text-red-800 text-left overflow-x-auto">
+                    Fehler: {uploadError}
+                </div>
+                <div className="space-y-3">
+                    <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_Backup_${entry.date}.pdf`)} className="w-full py-3 flex items-center justify-center bg-brand-600 hover:bg-brand-700">
+                        <DownloadIcon /> PDF manuell speichern
+                    </Button>
+                    <button onClick={() => setStatus({ step: 'form' })} className="text-sm text-brand-600 font-bold hover:underline">Zurück zum Formular</button>
+                </div>
+            </div>
+        ) : (
+            <>
+                <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-brand-600 mb-4"></div>
+                <h2 className="text-xl font-semibold text-brand-900">Bitte warten</h2>
+                <p className="text-gray-500 mt-2">{uploadMessage}</p>
+            </>
+        )}
       </div>
     );
   }
@@ -303,14 +336,17 @@ export default function App() {
   if (status.step === 'success') {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center border-t-4 border-brand-600">
+        <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full text-center border-t-4 border-green-500">
           <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-6 text-green-600">
             <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
           </div>
           <h2 className="text-2xl font-bold text-brand-900 mb-2">Erfolgreich!</h2>
-          <p className="text-gray-600 mb-8">Bericht wurde an die Nextcloud übertragen.</p>
+          <p className="text-gray-600 mb-8 leading-relaxed">Bericht wurde erfolgreich in die Nextcloud hochgeladen und archiviert.</p>
           <div className="space-y-3">
-             <Button onClick={resetForm} className="w-full">Neuer Eintrag</Button>
+             <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_${entry.date}.pdf`)} variant="outline" className="w-full py-3 flex items-center justify-center">
+                 <DownloadIcon /> Bericht als PDF lokal kopieren
+             </Button>
+             <Button onClick={resetForm} className="w-full py-3 font-bold">Neuer Eintrag</Button>
           </div>
         </div>
       </div>
@@ -342,21 +378,25 @@ export default function App() {
                       <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="Passwort" className="w-full text-center text-xl p-3 border rounded-lg outline-none focus:ring-2 focus:ring-brand-200 transition-all" />
                       <Button type="submit" className="w-full py-3 text-lg font-bold">Anmelden</Button>
                   </form>
-                  <p className="mt-4 text-xs text-gray-400 italic">Login für Projektleitung verfügbar.</p>
               </div>
           </div>
       ) : (
         <div className="max-w-3xl mx-auto p-4 md:p-6 lg:p-8">
             <form onSubmit={handleSubmit} className="space-y-8 bg-white p-6 md:p-8 rounded-xl shadow-lg border border-gray-100">
-                <div className="border-b pb-4">
-                    <h2 className="text-2xl font-bold text-brand-900">Tagesbericht</h2>
-                    <p className="text-gray-500 text-sm">Techniker: {currentUser.name}</p>
+                <div className="border-b pb-4 flex justify-between items-start">
+                    <div>
+                        <h2 className="text-2xl font-bold text-brand-900">Tagesbericht</h2>
+                        <p className="text-gray-500 text-sm">Techniker: {currentUser.name}</p>
+                    </div>
+                    <button type="button" onClick={handleManualPdfDownload} disabled={isGeneratingPdfOnly} className="text-brand-600 hover:bg-brand-50 px-3 py-1.5 rounded-lg border border-brand-200 text-xs font-bold flex items-center transition-colors">
+                        {isGeneratingPdfOnly ? "Generiert..." : <><DownloadIcon /> Vorschau / PDF</>}
+                    </button>
                 </div>
 
                 <div className="grid gap-6">
                     <div>
                         <label className="block text-sm font-bold text-brand-800 mb-1">Projekt</label>
-                        <select value={selectedProjectIndex} onChange={(e) => setSelectedProjectIndex(Number(e.target.value))} required className="block w-full rounded-lg border-gray-300 p-3 border bg-gray-50 focus:ring-2 focus:ring-brand-200">
+                        <select value={selectedProjectIndex} onChange={(e) => setSelectedProjectIndex(Number(e.target.value))} required className="block w-full rounded-lg border-gray-300 p-3 border bg-gray-50 focus:ring-2 focus:ring-brand-200 transition-all">
                             <option value={-1} disabled>Wählen...</option>
                             {config.projects.map((p, idx) => <option key={idx} value={idx}>{p.name}</option>)}
                         </select>
@@ -368,7 +408,7 @@ export default function App() {
                             <input type="date" required value={entry.date} onChange={e => setEntry({...entry, date: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border" />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Standort</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Standort / Adresse</label>
                             <input type="text" required placeholder="Ort, Straße" value={entry.location} onChange={e => setEntry({...entry, location: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border" />
                         </div>
                     </div>
@@ -393,34 +433,33 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className="bg-brand-50 p-4 rounded-xl border border-brand-100">
+                <div className="bg-brand-50 p-4 rounded-xl border border-brand-100 shadow-inner">
                     <div className="flex justify-between items-center mb-2">
                         <label className="block text-sm font-bold text-brand-800">Erledigte Arbeiten</label>
                         <button type="button" onClick={async () => {
-                            if (entry.images.length === 0) return alert("Zuerst Fotos machen für die KI-Analyse.");
+                            if (entry.images.length === 0) return alert("Fotos fehlen für die KI.");
                             setIsAnalyzingImages(true);
                             try {
                                 const text = await geminiService.analyzeImagesForReport(entry.images, entry.activityType);
                                 setEntry(prev => ({ ...prev, description: prev.description ? prev.description + "\n" + text : text }));
                             } finally { setIsAnalyzingImages(false); }
-                        }} className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded-full flex items-center shadow-sm hover:bg-brand-700 transition-colors">
+                        }} className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded-full flex items-center shadow-md hover:bg-brand-700 transition-colors">
                             {isAnalyzingImages ? "KI analysiert..." : <><PhotoSparklesIcon /> KI-Bericht</>}
                         </button>
                     </div>
-                    <textarea rows={6} required placeholder="Arbeitsbeschreibung..." value={entry.description} onChange={e => setEntry({...entry, description: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border focus:ring-2 focus:ring-brand-200" />
+                    <textarea rows={6} required placeholder="Geben Sie hier Ihre Tätigkeitsbeschreibung ein..." value={entry.description} onChange={e => setEntry({...entry, description: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border focus:ring-2 focus:ring-brand-200 transition-all" />
                 </div>
 
-                {/* Materialliste Bereich */}
                 <div className="border border-gray-200 p-4 rounded-xl bg-gray-50/50">
                     <label className="block text-sm font-bold text-brand-800 mb-3">Materialliste</label>
                     <div className="flex gap-2 mb-4">
-                        <input type="text" placeholder="Material (z.B. DN50)" value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} className="flex-1 p-2 border rounded text-sm" />
-                        <input type="text" placeholder="Menge" value={materialInput.amount} onChange={e => setMaterialInput({ ...materialInput, amount: e.target.value })} className="w-24 p-2 border rounded text-sm" />
-                        <button type="button" onClick={addMaterial} className="p-2 bg-brand-600 text-white rounded hover:bg-brand-700 transition-colors"><PlusIcon /></button>
+                        <input type="text" placeholder="Material" value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} className="flex-1 p-2 border rounded-lg text-sm" />
+                        <input type="text" placeholder="Menge" value={materialInput.amount} onChange={e => setMaterialInput({ ...materialInput, amount: e.target.value })} className="w-24 p-2 border rounded-lg text-sm" />
+                        <button type="button" onClick={addMaterial} className="p-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors"><PlusIcon /></button>
                     </div>
                     <div className="space-y-2">
                         {entry.materials.map((m, idx) => (
-                            <div key={idx} className="flex justify-between items-center bg-white p-2 rounded border text-sm shadow-sm border-gray-200">
+                            <div key={idx} className="flex justify-between items-center bg-white p-2 rounded-lg border border-gray-200 text-sm shadow-sm">
                                 <span><span className="font-bold text-brand-700">{m.amount}</span> - {m.name}</span>
                                 <button type="button" onClick={() => removeMaterial(idx)} className="text-red-500 hover:text-red-700 transition-colors"><TrashIcon /></button>
                             </div>
@@ -432,21 +471,22 @@ export default function App() {
                     <label className="block text-sm font-bold text-gray-700 mb-3">Fotos ({entry.images.length})</label>
                     <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
                         {entry.images.map((f, i) => (
-                            <div key={i} className="relative aspect-square border rounded overflow-hidden group border-gray-200 shadow-sm">
+                            <div key={i} className="relative aspect-square border rounded-lg overflow-hidden group border-gray-200 shadow-sm">
                                 <img src={URL.createObjectURL(f)} className="w-full h-full object-cover" />
                                 <button type="button" onClick={() => setEntry({...entry, images: entry.images.filter((_, idx) => idx !== i)})} className="absolute top-0 right-0 bg-red-500 text-white p-1 rounded-bl opacity-0 group-hover:opacity-100 transition-opacity"><TrashIcon /></button>
                             </div>
                         ))}
                         <label className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 hover:border-brand-400 transition-all">
                             <CameraIcon />
-                            <span className="text-[10px] text-gray-400 mt-1">Foto</span>
+                            <span className="text-[10px] text-gray-400 mt-1">Kamera</span>
                             <input type="file" accept="image/*" capture="environment" multiple onChange={e => e.target.files && setEntry({...entry, images: [...entry.images, ...Array.from(e.target.files)]})} className="hidden" />
                         </label>
                     </div>
                 </div>
 
-                <div className="pt-6 border-t">
+                <div className="pt-6 border-t flex flex-col gap-3">
                     <Button type="submit" className="w-full py-4 text-xl font-bold shadow-xl">Bericht Absenden</Button>
+                    <p className="text-[10px] text-center text-gray-400 italic">Der Bericht wird als PDF in der Nextcloud des gewählten Projekts abgelegt.</p>
                 </div>
             </form>
         </div>
@@ -461,21 +501,19 @@ export default function App() {
                 </div>
                 
                 <div className="grid lg:grid-cols-2 gap-10">
-                    {/* Projekte Verwaltung */}
                     <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                             <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Projekte</h4>
+                             <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Projekte (Nextcloud)</h4>
                              <button onClick={() => setShowHelp(!showHelp)} className="text-brand-500 hover:text-brand-700 flex items-center gap-1 text-xs font-bold bg-brand-50 px-2 py-1 rounded-full transition-colors">
-                                <InfoIcon /> Nextcloud Hilfe
+                                <InfoIcon /> Verbindungshilfe
                              </button>
                         </div>
 
                         {showHelp && (
                             <div className="mb-4 bg-blue-50 p-4 rounded-xl text-xs leading-relaxed text-blue-900 border border-blue-200 shadow-inner">
-                                <p className="font-bold mb-2">Nextcloud Konfiguration (.htaccess)</p>
-                                <p className="mb-2">Damit diese App (Absender) Daten in deiner Nextcloud (Empfänger) speichern darf, musst du die App-Domain freischalten.</p>
-                                <p className="mb-2">Deine App-Domain lautet: <b className="text-brand-700 bg-white px-1 rounded select-all">{currentAppDomain}</b></p>
-                                <p className="mb-2 italic">Pfad der Datei: <code className="bg-white/50 px-1">/deine_nextcloud/.htaccess</code></p>
+                                <p className="font-bold mb-2">WICHTIG: IONOS Nextcloud Fix</p>
+                                <p className="mb-2">Damit der Upload funktioniert, muss diese URL in der .htaccess Ihrer Nextcloud stehen:</p>
+                                <p className="mb-2 font-mono bg-white p-1 rounded select-all text-brand-700">{currentAppDomain}</p>
                                 <pre className="bg-white p-3 rounded-lg border text-[10px] mb-3 overflow-x-auto select-all shadow-sm">
 {`<IfModule mod_headers.c>
   SetEnvIf Origin "${currentAppDomain}" APP_ORIGIN=$0
@@ -484,12 +522,11 @@ export default function App() {
   Header set Access-Control-Allow-Headers "Authorization, Content-Type, Origin"
 </IfModule>`}
                                 </pre>
-                                <Button onClick={() => copyToClipboard(`<IfModule mod_headers.c>\n  SetEnvIf Origin "${currentAppDomain}" APP_ORIGIN=$0\n  Header set Access-Control-Allow-Origin %{APP_ORIGIN}e env=APP_ORIGIN\n  Header set Access-Control-Allow-Methods "GET, POST, OPTIONS, PUT, MKCOL"\n  Header set Access-Control-Allow-Headers "Authorization, Content-Type, Origin"\n</IfModule>`)} variant="primary" className="w-full py-1 text-[10px]">Code für .htaccess kopieren</Button>
+                                <Button onClick={() => copyToClipboard(`<IfModule mod_headers.c>\n  SetEnvIf Origin "${currentAppDomain}" APP_ORIGIN=$0\n  Header set Access-Control-Allow-Origin %{APP_ORIGIN}e env=APP_ORIGIN\n  Header set Access-Control-Allow-Methods "GET, POST, OPTIONS, PUT, MKCOL"\n  Header set Access-Control-Allow-Headers "Authorization, Content-Type, Origin"\n</IfModule>`)} variant="primary" className="w-full py-1 text-[10px]">Fix-Code kopieren</Button>
                             </div>
                         )}
 
                         <div className="space-y-2 mb-4 max-h-48 overflow-y-auto pr-1 border rounded-lg p-3 bg-gray-50 border-gray-200">
-                            {config.projects.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">Keine Projekte angelegt.</p>}
                             {config.projects.map(p => (
                                 <div key={p.token} className="flex justify-between items-center p-3 bg-white rounded-lg border border-gray-100 text-sm shadow-sm">
                                     <span className="font-medium truncate mr-2">{p.name}</span>
@@ -502,16 +539,15 @@ export default function App() {
                             <input placeholder="Nextcloud Share-Link" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
                             <Button onClick={() => {
                                 const token = newProjLink.split('/s/')[1]?.split('/')[0];
-                                if (!token || !newProjName) return alert("Pflichtfelder fehlen oder Link ungültig.");
+                                if (!token || !newProjName) return alert("Pflichtfelder fehlen.");
                                 saveConfig({...config, projects: [...config.projects, { name: newProjName, link: newProjLink, token }]});
                                 setNewProjName(''); setNewProjLink('');
-                            }} className="w-full">Projekt hinzufügen</Button>
+                            }} className="w-full">Hinzufügen</Button>
                         </div>
                     </div>
 
-                    {/* Techniker Verwaltung */}
                     <div className="space-y-4">
-                        <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Techniker & Benutzer</h4>
+                        <h4 className="text-sm font-bold uppercase tracking-wider text-brand-600">Techniker-Konten</h4>
                         <div className="space-y-2 mb-4 max-h-80 overflow-y-auto pr-1 border rounded-lg p-3 bg-gray-50 border-gray-200">
                             {config.technicians.map(t => (
                                 <div key={t.id} className={`flex flex-col p-3 bg-white rounded-lg border text-sm shadow-sm transition-all ${editingTechId === t.id ? 'border-brand-500 ring-1 ring-brand-500 bg-brand-50/30' : 'border-gray-100'}`}>
@@ -522,28 +558,21 @@ export default function App() {
                                                 <input value={editTechCode} onChange={e => setEditTechCode(e.target.value)} className="w-full p-1 border rounded text-xs uppercase" placeholder="Kürzel" />
                                                 <input value={editTechPass} onChange={e => setEditTechPass(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Passwort" />
                                             </div>
-                                            <div className="flex justify-between items-center pt-1">
-                                                <select value={editTechRole} onChange={e => setEditTechRole(e.target.value as any)} className="text-[10px] p-1 border rounded bg-white">
-                                                    <option value="user">User</option>
-                                                    <option value="admin">Admin</option>
-                                                </select>
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => setEditingTechId(null)} className="p-1 text-gray-400 hover:text-gray-600 transition-colors"><CloseIcon /></button>
-                                                    <button onClick={saveEditedTech} className="p-1 text-green-500 hover:text-green-700 transition-colors"><CheckIcon /></button>
-                                                </div>
+                                            <div className="flex justify-end gap-2 pt-2">
+                                                <button onClick={() => setEditingTechId(null)} className="p-1 text-gray-400 hover:text-gray-600"><CloseIcon /></button>
+                                                <button onClick={saveEditedTech} className="p-1 text-green-500 hover:text-green-700"><CheckIcon /></button>
                                             </div>
                                         </div>
                                     ) : (
                                         <div className="flex justify-between items-center">
-                                            <div className="truncate mr-2">
-                                                <span className="font-bold text-brand-700 mr-2">[{t.code}]</span> {t.name}
-                                                {t.role === 'admin' && <span className="ml-2 text-[9px] bg-brand-100 text-brand-800 px-2 py-0.5 rounded-full font-bold">ADMIN</span>}
-                                                <p className="text-[10px] text-gray-400 mt-1">Passwort: {t.password || 'Keines'}</p>
+                                            <div>
+                                                <span className="font-bold text-brand-700">[{t.code}]</span> {t.name}
+                                                <p className="text-[10px] text-gray-400">PW: {t.password}</p>
                                             </div>
                                             <div className="flex gap-1">
-                                                <button onClick={() => startEditingTech(t)} className="p-1.5 text-brand-400 hover:text-brand-600 transition-colors"><EditIcon /></button>
+                                                <button onClick={() => startEditingTech(t)} className="p-1.5 text-brand-400 hover:text-brand-600"><EditIcon /></button>
                                                 {t.id !== currentUser?.id && (
-                                                    <button onClick={() => saveConfig({...config, technicians: config.technicians.filter(tech => tech.id !== t.id)})} className="p-1.5 text-red-300 hover:text-red-500 transition-colors"><TrashIcon /></button>
+                                                    <button onClick={() => saveConfig({...config, technicians: config.technicians.filter(tech => tech.id !== t.id)})} className="p-1.5 text-red-300 hover:text-red-500"><TrashIcon /></button>
                                                 )}
                                             </div>
                                         </div>
@@ -551,32 +580,24 @@ export default function App() {
                                 </div>
                             ))}
                         </div>
-                        
-                        {!editingTechId && (
-                            <div className="space-y-3 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                                <h5 className="text-xs font-bold text-gray-500 uppercase">Neuen Techniker anlegen</h5>
-                                <input placeholder="Vollständiger Name" value={newTechName} onChange={e => setNewTechName(e.target.value)} className="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                                <div className="grid grid-cols-2 gap-3">
-                                    <input placeholder="Login-Kürzel" value={newTechCode} onChange={e => setNewTechCode(e.target.value)} className="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                                    <input type="password" placeholder="Passwort" value={newTechPass} onChange={e => setNewTechPass(e.target.value)} className="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-200 outline-none" />
-                                </div>
-                                <select value={newTechRole} onChange={e => setNewTechRole(e.target.value as any)} className="w-full p-2 border rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-brand-200 outline-none">
-                                    <option value="user">Benutzer (Standard)</option>
-                                    <option value="admin">Administrator (Voller Zugriff)</option>
-                                </select>
-                                <Button onClick={() => {
-                                    if (!newTechName || !newTechCode) return alert("Name und Kürzel sind Pflichtfelder.");
-                                    const id = Date.now().toString();
-                                    saveConfig({...config, technicians: [...config.technicians, { id, name: newTechName, code: newTechCode.toUpperCase(), password: newTechPass, role: newTechRole }]});
-                                    setNewTechName(''); setNewTechCode(''); setNewTechPass('');
-                                }} variant="secondary" className="w-full">Hinzufügen</Button>
+                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                            <h5 className="text-xs font-bold text-gray-500 uppercase mb-3">Neu anlegen</h5>
+                            <input placeholder="Name" value={newTechName} onChange={e => setNewTechName(e.target.value)} className="w-full p-2 border rounded-lg text-sm mb-2" />
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                                <input placeholder="Kürzel" value={newTechCode} onChange={e => setNewTechCode(e.target.value)} className="w-full p-2 border rounded-lg text-sm uppercase" />
+                                <input placeholder="Passwort" value={newTechPass} onChange={e => setNewTechPass(e.target.value)} className="w-full p-2 border rounded-lg text-sm" />
                             </div>
-                        )}
+                            <Button onClick={() => {
+                                if (!newTechName || !newTechCode) return alert("Pflichtfelder!");
+                                saveConfig({...config, technicians: [...config.technicians, { id: Date.now().toString(), name: newTechName, code: newTechCode.toUpperCase(), password: newTechPass, role: 'user' }]});
+                                setNewTechName(''); setNewTechCode(''); setNewTechPass('');
+                            }} variant="secondary" className="w-full">Hinzufügen</Button>
+                        </div>
                     </div>
                 </div>
                 
                 <div className="pt-8 mt-10 border-t flex justify-between items-center">
-                    <p className="text-xs text-gray-400">IT-KOM Bautagebuch v1.1.5</p>
+                    <p className="text-[10px] text-gray-400">Build: 2025-05-v1.1.8</p>
                     <Button variant="outline" onClick={() => { setShowSettings(false); setEditingTechId(null); }}>Schließen</Button>
                 </div>
             </div>
