@@ -85,6 +85,43 @@ const InfoIcon = () => (
 const STORAGE_KEY = 'glasfaser_app_config_v2';
 const DRAFT_KEY = 'glasfaser_entry_draft_v1';
 
+const MATERIAL_OPTIONS = [
+  "(10060209) GWV Basismodul",
+  "(10060212) nicht erledigt - Abbruch GWV",
+  "(10060202) Gf-TA Connect Only",
+  "(10060210) nicht erledigt ? Connect Auftrag",
+  "(10060217) nicht erledigt ? Connect BULK",
+  "(10075642) Montage Gf-GV",
+  "(10075530) Metall-Rohr-/-Kabelkanalnetzbau",
+  "(10075520) Kunststoff-Rohr-/Kabelkanalnetzbau",
+  "(10075542) Gf-Kabel einziehen/einblasen u. verlegen",
+  "(10075572) Zusätzliche Gf-Spleiße herstellen",
+  "(10075739) Brandschottung herstellen 5cm x 5cm",
+  "(10060182) OneBox Setzen",
+  "(10072459) FTTH - Stundensatz FTTH",
+  "(10072239) Zusatzaufwand",
+  "(10075741) Entstörung NE3 bei FTTx-Anschlüssen",
+  "(10075744) Teilerledigung Auskundung",
+  "(10060220) Herstellen Connect FTTH mit NE4",
+  "(10060221) Herstellen BULK Connect FTTH mit NE4",
+  "(10060222) nicht erledigt - Connect BULK",
+  "(10060223) Problembehebung FTTH-Anschluss",
+  "(10060226) VOA FTTH - Small",
+  "(10060227) VOA FTTH - Standard",
+  "(10060228) VOA FTTH - Large",
+  "(10060229) Montage Gf-SP (klassisch)",
+  "(10060230) Montage Gf-SP (vorkonf.)",
+  "(10060231) Kleiner Decken-/Wanddurchbruch",
+  "(10060232) Mini-GWV Basismodul",
+  "(10060233) Montage Metallhaube",
+  "(10072109) NE 5 - Small",
+  "(10072119) NE 5 - Medium",
+  "(10072129) NE 5 - Large",
+  "(10072139) NE 5 - Extra Large",
+  "(10072149) NE 5 - Installation S",
+  "(10072159) NE 5 - Installation M"
+];
+
 export default function App() {
   const [config, setConfig] = useState<AppConfig>({ technicians: [], projects: [] });
   const [currentUser, setCurrentUser] = useState<Technician | null>(null);
@@ -115,7 +152,7 @@ export default function App() {
 
   // Form States
   const [selectedProjectIndex, setSelectedProjectIndex] = useState<number>(-1); 
-  const [materialInput, setMaterialInput] = useState({ name: '', amount: '' });
+  const [materialInput, setMaterialInput] = useState({ name: '', amount: '1' });
   const [entry, setEntry] = useState<DiaryEntry>({
     date: new Date().toISOString().split('T')[0],
     location: '',
@@ -139,16 +176,24 @@ export default function App() {
       try { loadedConfig = JSON.parse(stored); } catch (e) { console.error("Config parse failed", e); }
     }
     
-    // Ensure at least one admin exists if config is truly empty
-    if (loadedConfig.technicians.length === 0) {
+    // Ensure admin account with code 'ADMIN' exists
+    const adminExists = loadedConfig.technicians.some(t => t.code.toUpperCase() === 'ADMIN');
+    if (!adminExists) {
         loadedConfig.technicians.push({ 
             id: 'admin-init', 
             name: 'Administrator', 
             code: 'ADMIN', 
-            password: 'admin', 
+            password: 'admin123', 
             role: 'admin' 
         });
         localStorage.setItem(STORAGE_KEY, JSON.stringify(loadedConfig));
+    } else {
+        // If it exists, ensure the password is 'admin123' if it's the initial admin
+        const initialAdmin = loadedConfig.technicians.find(t => t.id === 'admin-init');
+        if (initialAdmin && initialAdmin.password !== 'admin123') {
+            initialAdmin.password = 'admin123';
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(loadedConfig));
+        }
     }
     setConfig(loadedConfig);
   }, []);
@@ -449,14 +494,36 @@ export default function App() {
 
                 <div className="border p-4 rounded-xl bg-gray-50/50">
                     <label className="block text-sm font-bold text-brand-800 mb-3">Materialliste</label>
-                    <div className="flex gap-2 mb-4">
-                        <input type="text" placeholder="Material" value={materialInput.name} onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} className="flex-1 p-2 border rounded-lg text-sm" />
-                        <input type="text" placeholder="Menge" value={materialInput.amount} onChange={e => setMaterialInput({ ...materialInput, amount: e.target.value })} className="w-24 p-2 border rounded-lg text-sm" />
+                    <div className="flex gap-2 mb-4 items-center">
+                        <input 
+                            type="text" 
+                            list="material-options"
+                            placeholder="Material" 
+                            value={materialInput.name} 
+                            onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} 
+                            className="flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-100 outline-none bg-white" 
+                        />
+                        <datalist id="material-options">
+                            {MATERIAL_OPTIONS.map(opt => <option key={opt} value={opt} />)}
+                        </datalist>
+                        <div className="flex items-center border border-gray-300 rounded-lg bg-white overflow-hidden w-24 focus-within:ring-2 focus-within:ring-brand-100">
+                            <input 
+                                type="text" 
+                                placeholder="Menge" 
+                                value={materialInput.amount} 
+                                onChange={e => setMaterialInput({ ...materialInput, amount: e.target.value })} 
+                                onFocus={e => e.target.select()}
+                                className="w-full p-2 text-sm border-none focus:ring-0 outline-none" 
+                            />
+                            <span className="pr-2 text-xs font-bold text-gray-400 select-none">ST</span>
+                        </div>
                         <button type="button" onClick={() => {
                             if (!materialInput.name || !materialInput.amount) return;
-                            setEntry(prev => ({ ...prev, materials: [...prev.materials, { ...materialInput }] }));
-                            setMaterialInput({ name: '', amount: '' });
-                        }} className="p-2 bg-brand-600 text-white rounded-lg"><PlusIcon /></button>
+                            setEntry(prev => ({ ...prev, materials: [...prev.materials, { name: materialInput.name, amount: `${materialInput.amount} ST` }] }));
+                            setMaterialInput({ name: '', amount: '1' });
+                        }} className="p-2.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors flex-shrink-0">
+                            <PlusIcon />
+                        </button>
                     </div>
                     <div className="space-y-2">
                         {entry.materials.map((m, idx) => (
