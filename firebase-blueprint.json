@@ -1,0 +1,53 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and role management",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "name": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "DiaryEntry": {
+      "title": "Diary Entry",
+      "description": "A daily report from a technician",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date-time" },
+        "location": { "type": "string" },
+        "weather": { "type": "string" },
+        "activityType": { "type": "string" },
+        "description": { "type": "string" },
+        "missingWork": { "type": "string" },
+        "materials": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "amount": { "type": "string" }
+            }
+          }
+        },
+        "technician": { "type": "string" },
+        "technicianUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "location", "technician", "technicianUid", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/diaryEntries/{entryId}": {
+      "schema": "DiaryEntry",
+      "description": "Technician diary entries"
+    }
+  }
+}

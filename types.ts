@@ -33,6 +33,7 @@ export interface DiaryEntry {
   missingWork: string; // Was fehlt noch
   materials: MaterialItem[]; // Materialliste
   technician: string; // Full name
+  technicianUid?: string; // Firebase UID
   images: File[];
 }
 

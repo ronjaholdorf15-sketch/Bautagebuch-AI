@@ -1,0 +1,92 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {userId}
+// Fields:
+//   - uid: string (required)
+//   - email: string (required, email format)
+//   - role: string (required, 'admin' | 'user')
+//   - name: string (optional)
+//
+// Collection: diaryEntries
+// Document ID: {entryId}
+// Fields:
+//   - date: string (required, ISO format)
+//   - location: string (required)
+//   - weather: string (optional)
+//   - activityType: string (optional)
+//   - description: string (optional)
+//   - missingWork: string (optional)
+//   - materials: list of objects (optional)
+//     - name: string
+//     - amount: string
+//   - technician: string (required)
+//   - technicianUid: string (required)
+//   - createdAt: timestamp (required)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "ronja.holdorf15@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.technicianUid;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid is string &&
+             data.email is string &&
+             data.role in ['admin', 'user'];
+    }
+
+    function isValidDiaryEntry(data) {
+      return data.keys().hasAll(['date', 'location', 'technician', 'technicianUid', 'createdAt']) &&
+             data.date is string &&
+             data.location is string &&
+             data.technician is string &&
+             data.technicianUid is string &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /diaryEntries/{entryId} {
+      allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
+      allow create: if isAuthenticated() && isValidDiaryEntry(request.resource.data) && 
+                      request.resource.data.technicianUid == request.auth.uid;
+      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidDiaryEntry(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}

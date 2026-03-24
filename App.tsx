@@ -6,6 +6,26 @@ import * as geminiService from './services/geminiService';
 import { generateDiaryPdf } from './services/pdfService';
 import { Button } from './components/Button';
 import { Logo, getLogoAsBase64 } from './components/Logo';
+import { auth, db } from './firebase';
+import { 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
+import { 
+  collection, 
+  addDoc, 
+  query, 
+  where, 
+  getDocs, 
+  serverTimestamp,
+  Timestamp,
+  orderBy
+} from 'firebase/firestore';
+import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
 
 // Icons
 const CameraIcon = () => (
@@ -19,6 +39,12 @@ const PhotoSparklesIcon = () => (
     <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 00-1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
     </svg>
+);
+
+const MagicWandIcon = () => (
+  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+  </svg>
 );
 
 const DownloadIcon = () => (
@@ -166,9 +192,30 @@ export default function App() {
   });
   
   const [isAnalyzingImages, setIsAnalyzingImages] = useState(false);
+  const [isEnhancingText, setIsEnhancingText] = useState(false);
+  const [isGeneratingMissing, setIsGeneratingMissing] = useState(false);
   const [isGeneratingPdfOnly, setIsGeneratingPdfOnly] = useState(false);
+  
+  // Firebase Auth State
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+
+  // Material Analysis States
+  const [analysisStartDate, setAnalysisStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [analysisEndDate, setAnalysisEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResults, setAnalysisResults] = useState<{ name: string; amount: number }[]>([]);
+  const [activeAdminTab, setActiveAdminTab] = useState<'general' | 'material'>('general');
 
   // Load configuration on mount
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     let loadedConfig: AppConfig = { technicians: [], projects: [] };
@@ -205,6 +252,26 @@ export default function App() {
         localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...draftData, projectIndex: selectedProjectIndex }));
     }
   }, [entry, selectedProjectIndex, status.step, currentUser]);
+
+  // Restore Draft on Login
+  useEffect(() => {
+    if (currentUser && status.step === 'form') {
+      const draft = localStorage.getItem(DRAFT_KEY);
+      if (draft) {
+        try {
+          const parsed = JSON.parse(draft);
+          const { projectIndex, ...entryData } = parsed;
+          
+          // Only restore if the entry is currently empty (to avoid overwriting fresh data)
+          if (!entry.location && !entry.description && entry.materials.length === 0) {
+            setEntry(prev => ({ ...prev, ...entryData, technician: currentUser.name }));
+            if (projectIndex !== undefined) setSelectedProjectIndex(projectIndex);
+            alert("Entwurf wurde wiederhergestellt.");
+          }
+        } catch (e) { console.error("Draft restore failed", e); }
+      }
+    }
+  }, [currentUser, status.step]);
 
   const saveConfig = (newConfig: AppConfig) => {
     setConfig(newConfig);
@@ -245,18 +312,50 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const tech = config.technicians.find(t => t.code.toUpperCase() === loginCode.toUpperCase());
-    if (tech) {
-        if (tech.password && tech.password !== loginPassword) { alert("Falsches Passwort."); return; }
-        setCurrentUser(tech);
-        setEntry(prev => ({ ...prev, technician: tech.name }));
-        setStatus({ step: 'form' });
-    } else alert("Benutzer nicht gefunden.");
+    
+    // Check if it's the master admin login via code
+    if (loginCode.toUpperCase() === 'ADMIN' && loginPassword === 'admin123') {
+        const adminTech = config.technicians.find(t => t.code.toUpperCase() === 'ADMIN');
+        if (adminTech) {
+            setCurrentUser(adminTech);
+            setEntry(prev => ({ ...prev, technician: adminTech.name }));
+            setStatus({ step: 'form' });
+            return;
+        }
+    }
+
+    try {
+        const provider = new GoogleAuthProvider();
+        const result = await signInWithPopup(auth, provider);
+        const user = result.user;
+        
+        // Find technician by email
+        const tech = config.technicians.find(t => t.code.toUpperCase() === loginCode.toUpperCase());
+        if (tech) {
+            if (tech.password && tech.password !== loginPassword) { alert("Falsches Passwort."); return; }
+            setCurrentUser(tech);
+            setEntry(prev => ({ ...prev, technician: tech.name, technicianUid: user.uid }));
+            setStatus({ step: 'form' });
+        } else {
+            alert("Benutzer nicht in der Technikerliste gefunden. Bitte Admin kontaktieren.");
+            await signOut(auth);
+        }
+    } catch (error) {
+        console.error("Login failed", error);
+        alert("Login fehlgeschlagen. Bitte Google-Konto verwenden.");
+    }
   };
 
-  const handleLogout = () => { setCurrentUser(null); setStatus({ step: 'login' }); setShowSettings(false); setLoginCode(''); setLoginPassword(''); };
+  const handleLogout = async () => { 
+    await signOut(auth);
+    setCurrentUser(null); 
+    setStatus({ step: 'login' }); 
+    setShowSettings(false); 
+    setLoginCode(''); 
+    setLoginPassword(''); 
+  };
 
   const downloadBlob = (blob: Blob, filename: string) => {
       const url = window.URL.createObjectURL(blob);
@@ -303,12 +402,50 @@ export default function App() {
     setEditingTechId(null);
   };
 
+  const handleAnalyzeImages = async () => {
+    if (entry.images.length === 0) return alert("Zuerst Fotos machen.");
+    setIsAnalyzingImages(true);
+    try {
+        const text = await geminiService.analyzeImagesForReport(entry.images, entry.activityType);
+        setEntry(prev => ({ ...prev, description: prev.description ? prev.description + "\n" + text : text }));
+    } catch (err) {
+        alert("Fehler bei der Bildanalyse.");
+    } finally { setIsAnalyzingImages(false); }
+  };
+
+  const handleEnhanceText = async () => {
+    if (!entry.description) return alert("Zuerst Text eingeben.");
+    setIsEnhancingText(true);
+    try {
+        const enhanced = await geminiService.enhanceDiaryEntry(entry.description, entry.activityType);
+        setEntry(prev => ({ ...prev, description: enhanced }));
+    } catch (err) {
+        alert("Fehler bei der Textverbesserung.");
+    } finally { setIsEnhancingText(false); }
+  };
+
+  const handleGenerateMissing = async () => {
+    if (!entry.description) return alert("Zuerst Tätigkeitsbericht ausfüllen.");
+    setIsGeneratingMissing(true);
+    try {
+        const suggestions = await geminiService.suggestMissingWork(entry.description, entry.activityType);
+        setEntry(prev => ({ ...prev, missingWork: suggestions }));
+    } catch (err) {
+        alert("Fehler bei den Vorschlägen.");
+    } finally { setIsGeneratingMissing(false); }
+  };
+
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onloadend = () => saveConfig({ ...config, logo: reader.result as string });
     reader.readAsDataURL(file);
+  };
+
+  const handleImageAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setEntry(prev => ({ ...prev, images: [...prev.images, ...files] }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -318,13 +455,28 @@ export default function App() {
     setUploadError(null);
     try {
       setStatus({ step: 'uploading' });
+      
+      // 1. Save to Firestore (Central Database)
+      setUploadMessage("Speichere in Datenbank...");
+      const firestoreEntry = {
+        ...entry,
+        technicianUid: auth.currentUser?.uid || 'anonymous',
+        createdAt: serverTimestamp(),
+        // We don't store File objects in Firestore
+        images: [] 
+      };
+      await addDoc(collection(db, 'diaryEntries'), firestoreEntry);
+
+      // 2. Generate PDF
       setUploadMessage("Generiere PDF...");
       const logoBase64 = await getLogoAsBase64(config.logo);
       const pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
       setLastGeneratedPdf(pdfBlob); 
       
+      // 3. Upload to Nextcloud
       setUploadMessage(`Sende zu Nextcloud (${project.name})...`);
       await nextcloudService.uploadDiaryEntry(project, entry, pdfBlob);
+      
       localStorage.removeItem(DRAFT_KEY);
       setStatus({ step: 'success' });
     } catch (error: any) {
@@ -335,11 +487,105 @@ export default function App() {
 
   const resetForm = () => { 
     localStorage.removeItem(DRAFT_KEY); 
-    setEntry({...entry, images: [], description: '', missingWork: '', materials: [], location: ''}); 
+    setEntry({
+      date: new Date().toISOString().split('T')[0],
+      location: '',
+      weather: WeatherCondition.SUNNY,
+      activityType: 'Tiefbau',
+      description: '',
+      missingWork: '',
+      materials: [],
+      technician: currentUser?.name || '',
+      images: []
+    }); 
+    setSelectedProjectIndex(-1);
     setStatus({ step: 'form' }); 
     setLastGeneratedPdf(null); 
     setUploadError(null);
   };
+
+  const handleReuseData = () => {
+    // Keep location, weather, activityType, projectIndex
+    // Reset images, description, missingWork, materials
+    setEntry(prev => ({
+      ...prev,
+      images: [],
+      description: '',
+      missingWork: '',
+      materials: [],
+      date: new Date().toISOString().split('T')[0]
+    }));
+    setStatus({ step: 'form' });
+    setLastGeneratedPdf(null);
+    setUploadError(null);
+  };
+
+  const handleAnalyzeMaterials = async () => {
+    setIsAnalyzing(true);
+    try {
+        const q = query(
+            collection(db, 'diaryEntries'),
+            where('date', '>=', analysisStartDate),
+            where('date', '<=', analysisEndDate),
+            orderBy('date', 'desc')
+        );
+        const snapshot = await getDocs(q);
+        const materialMap: { [key: string]: number } = {};
+        
+        snapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.materials && Array.isArray(data.materials)) {
+                data.materials.forEach((m: any) => {
+                    const amount = parseInt(m.amount) || 0;
+                    materialMap[m.name] = (materialMap[m.name] || 0) + amount;
+                });
+            }
+        });
+
+        const results = Object.entries(materialMap).map(([name, amount]) => ({ name, amount }));
+        setAnalysisResults(results);
+    } catch (err) {
+        console.error("Analysis failed", err);
+        alert("Fehler bei der Material-Auswertung.");
+    } finally {
+        setIsAnalyzing(false);
+    }
+  };
+
+  const exportMaterialPdf = () => {
+    if (analysisResults.length === 0) return;
+    const doc = new jsPDF();
+    
+    // Header
+    doc.setFontSize(20);
+    doc.setTextColor(27, 62, 120); // Brand Blue
+    doc.text('Material-Bedarfsliste', 14, 22);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Zeitraum: ${analysisStartDate} bis ${analysisEndDate}`, 14, 30);
+    doc.text(`Erstellt am: ${new Date().toLocaleString()}`, 14, 35);
+
+    // Table
+    (doc as any).autoTable({
+        startY: 45,
+        head: [['Materialbezeichnung', 'Gesamtmenge', 'Einheit']],
+        body: analysisResults.map(r => [r.name, r.amount, 'ST']),
+        headStyles: { fillColor: [27, 62, 120] },
+        alternateRowStyles: { fillColor: [245, 247, 250] },
+        margin: { top: 45 }
+    });
+
+    doc.save(`Materialbedarf_${analysisStartDate}_bis_${analysisEndDate}.pdf`);
+  };
+
+  if (!isAuthReady) {
+    return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-brand-600"></div>
+        </div>
+    );
+  }
 
   if (status.step === 'uploading') {
     return (
@@ -352,7 +598,7 @@ export default function App() {
                 <h2 className="text-xl font-bold text-gray-900 mb-2">Upload fehlgeschlagen</h2>
                 <p className="text-sm text-gray-500 mb-6">Der Bericht konnte nicht hochgeladen werden (z.B. keine Berechtigung oder kein Internet).</p>
                 <div className="space-y-3">
-                    <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_Backup_${entry.date}.pdf`)} className="w-full py-3 flex items-center justify-center bg-brand-600">
+                    <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_Backup_${entry.date}.pdf`)} className="w-full py-3 flex items-center justify-center bg-brand-primary">
                         <DownloadIcon /> PDF manuell sichern
                     </Button>
                     <button onClick={() => setStatus({ step: 'form' })} className="text-sm text-brand-600 font-bold">Zurück zum Formular</button>
@@ -381,7 +627,8 @@ export default function App() {
              <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_${entry.date}.pdf`)} variant="outline" className="w-full">
                  <DownloadIcon /> Als PDF lokal kopieren
              </Button>
-             <Button onClick={resetForm} className="w-full">Neuer Eintrag</Button>
+             <Button onClick={handleReuseData} variant="secondary" className="w-full">Daten für neuen Bericht übernehmen</Button>
+             <Button onClick={resetForm} className="w-full">Komplett neuer Bericht</Button>
           </div>
         </div>
       </div>
@@ -389,171 +636,374 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20 relative font-sans">
-      <div className="sticky top-0 z-20 bg-white shadow-sm border-b px-4 py-3 flex items-center justify-between">
+    <div className="min-h-screen bg-slate-50 pb-20 relative font-sans selection:bg-brand-primary/10">
+      {/* Header */}
+      <div className="sticky top-0 z-30 glass border-b border-white/20 px-4 py-3 flex items-center justify-between shadow-soft">
         <div className="flex items-center flex-1 overflow-hidden">
              <Logo className="h-10 md:h-12 w-auto shrink-0" src={config.logo} />
-             <span className="ml-4 font-bold text-brand-900 hidden sm:block text-lg border-l pl-4 truncate">Bautagebuch</span>
+             <div className="ml-4 pl-4 border-l border-slate-200 hidden sm:flex flex-col">
+                <span className="font-extrabold text-slate-900 text-lg leading-tight tracking-tight">Bautagebuch</span>
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em]">IT-KOM Management</span>
+             </div>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-3 shrink-0 items-center">
             {currentUser?.role === 'admin' && (
-                <button onClick={() => setShowSettings(true)} className="p-2 text-brand-600 hover:bg-brand-50 rounded-full">
+                <button 
+                  onClick={() => setShowSettings(true)} 
+                  className="p-2.5 text-slate-500 hover:text-brand-primary hover:bg-brand-primary/5 rounded-xl transition-all duration-200"
+                  title="Einstellungen"
+                >
                     <SettingsIcon />
                 </button>
             )}
-            {currentUser && <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-600 rounded-full"><LogoutIcon /></button>}
+            {currentUser && (
+              <div className="flex items-center gap-3 pl-3 border-l border-slate-200">
+                <div className="hidden md:flex flex-col items-end">
+                  <span className="text-xs font-bold text-slate-800">{currentUser.name}</span>
+                  <span className="text-[9px] text-slate-400 uppercase font-bold tracking-widest">{currentUser.role}</span>
+                </div>
+                <button 
+                  onClick={handleLogout} 
+                  className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all duration-200"
+                  title="Abmelden"
+                >
+                  <LogoutIcon />
+                </button>
+              </div>
+            )}
         </div>
       </div>
 
       {!currentUser ? (
-          <div className="max-w-md mx-auto mt-16 p-6">
+          <div className="max-w-md mx-auto mt-16 p-6 animate-fade-in">
               <Logo className="h-24 mx-auto mb-10" src={config.logo} />
-              <div className="bg-white rounded-2xl shadow-xl p-8 border-t-4 border-brand-600">
-                  <h2 className="text-xl font-bold text-center text-brand-900 mb-6 uppercase">Login</h2>
-                  <form onSubmit={handleLogin} className="space-y-4">
-                      <input type="text" value={loginCode} onChange={e => setLoginCode(e.target.value)} placeholder="Techniker Kürzel" className="w-full text-center text-xl p-3 border rounded-lg uppercase outline-none focus:ring-2 focus:ring-brand-100" />
-                      <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="Passwort" className="w-full text-center text-xl p-3 border rounded-lg outline-none focus:ring-2 focus:ring-brand-100" />
-                      <Button type="submit" className="w-full py-4 text-lg font-bold">Anmelden</Button>
+              <div className="bg-white rounded-[2.5rem] shadow-premium p-10 border border-slate-100">
+                  <div className="text-center mb-10">
+                    <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Anmelden</h2>
+                    <p className="text-sm text-slate-400 font-medium mt-2">Willkommen zurück im Bautagebuch</p>
+                  </div>
+                  <form onSubmit={handleLogin} className="space-y-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Benutzerkürzel</label>
+                        <input 
+                          type="text" 
+                          value={loginCode} 
+                          onChange={e => setLoginCode(e.target.value)} 
+                          placeholder="ABC" 
+                          className="w-full text-center text-2xl font-mono p-5 border border-slate-200 rounded-2xl uppercase outline-none input-focus bg-slate-50/50" 
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Passwort</label>
+                        <input 
+                          type="password" 
+                          value={loginPassword} 
+                          onChange={e => setLoginPassword(e.target.value)} 
+                          placeholder="••••" 
+                          className="w-full text-center text-2xl p-5 border border-slate-200 rounded-2xl outline-none input-focus bg-slate-50/50" 
+                        />
+                      </div>
+                      <Button type="submit" className="w-full py-5 text-lg font-black rounded-2xl shadow-xl shadow-brand-primary/20 bg-brand-primary hover:bg-brand-primary/90 active:scale-[0.98] transition-all">
+                        LOGIN
+                      </Button>
                   </form>
               </div>
           </div>
       ) : (
-        <div className="max-w-3xl mx-auto p-4 md:p-8">
-            <form onSubmit={handleSubmit} className="space-y-8 bg-white p-6 md:p-8 rounded-xl shadow-lg border">
-                <div className="border-b pb-4 flex justify-between items-start">
-                    <div>
-                        <h2 className="text-2xl font-bold text-brand-900">Tagesbericht</h2>
-                        <div className="flex items-center gap-2 mt-1">
-                            <span className="text-gray-500 text-sm">{currentUser.name}</span>
-                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${currentUser.role === 'admin' ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
-                                {currentUser.role}
-                            </span>
-                        </div>
+        <div className="max-w-3xl mx-auto p-4 md:p-10 animate-fade-in">
+            <form onSubmit={handleSubmit} className="space-y-8">
+                {/* Header Card */}
+                <div className="bg-white p-6 md:p-10 rounded-[2.5rem] shadow-soft border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-6">
+                    <div className="text-center md:text-left">
+                        <h2 className="text-4xl font-black text-slate-900 tracking-tighter">Tagesbericht</h2>
+                        <p className="text-slate-400 text-sm font-medium mt-1">Erfassen Sie Ihre heutigen Tätigkeiten</p>
                     </div>
-                    <button type="button" onClick={handleManualPdfDownload} disabled={isGeneratingPdfOnly} className="text-brand-600 hover:bg-brand-50 px-3 py-1.5 rounded-lg border border-brand-100 text-xs font-bold flex items-center">
-                        {isGeneratingPdfOnly ? "Lädt..." : <><DownloadIcon /> Vorschau / PDF</>}
+                    <button 
+                      type="button" 
+                      onClick={handleManualPdfDownload} 
+                      disabled={isGeneratingPdfOnly} 
+                      className="w-full md:w-auto px-8 py-4 bg-slate-50 hover:bg-brand-primary/5 text-brand-primary rounded-2xl border border-slate-200 text-sm font-bold flex items-center justify-center transition-all active:scale-95 shadow-sm"
+                    >
+                        {isGeneratingPdfOnly ? (
+                          <span className="flex items-center gap-2">
+                            <svg className="animate-spin h-4 w-4 text-brand-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Generiere...
+                          </span>
+                        ) : <><DownloadIcon /> Vorschau / PDF</>}
                     </button>
                 </div>
 
-                <div className="grid gap-6">
-                    <div>
-                        <label className="block text-sm font-bold text-brand-800 mb-1">Projekt auswählen</label>
-                        <select value={selectedProjectIndex} onChange={(e) => setSelectedProjectIndex(Number(e.target.value))} required className="block w-full rounded-lg border-gray-300 p-3 border bg-gray-50 focus:ring-2 focus:ring-brand-100">
-                            <option value={-1} disabled>Bitte wählen...</option>
-                            {config.projects.map((p, idx) => <option key={idx} value={idx}>{p.name}</option>)}
-                        </select>
+                <div className="grid gap-8">
+                    {/* Project Selection */}
+                    <div className="bg-white p-8 rounded-[2rem] shadow-soft border border-slate-100">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Projekt auswählen</label>
+                        <div className="relative">
+                          <select 
+                            value={selectedProjectIndex} 
+                            onChange={(e) => setSelectedProjectIndex(Number(e.target.value))} 
+                            required 
+                            className="block w-full appearance-none rounded-2xl border-slate-200 p-5 border bg-slate-50/50 input-focus outline-none transition-all font-bold text-slate-700"
+                          >
+                              <option value={-1} disabled>Bitte wählen...</option>
+                              {config.projects.map((p, idx) => <option key={idx} value={idx}>{p.name}</option>)}
+                          </select>
+                          <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                          </div>
+                        </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Datum</label>
-                            <input type="date" required value={entry.date} onChange={e => setEntry({...entry, date: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border" />
+                    {/* Metadata Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="bg-white p-8 rounded-[2rem] shadow-soft border border-slate-100">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Datum</label>
+                            <input 
+                              type="date" 
+                              required 
+                              value={entry.date} 
+                              onChange={e => setEntry({...entry, date: e.target.value})} 
+                              className="block w-full rounded-2xl border-slate-200 p-5 border bg-slate-50/50 input-focus outline-none transition-all font-mono font-bold text-slate-700" 
+                            />
                         </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Standort / Straße</label>
-                            <input type="text" required placeholder="Ort, Straße..." value={entry.location} onChange={e => setEntry({...entry, location: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border" />
+                        <div className="bg-white p-8 rounded-[2rem] shadow-soft border border-slate-100">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Einsatzort</label>
+                            <input 
+                              type="text" 
+                              required 
+                              placeholder="z.B. Berlin" 
+                              value={entry.location} 
+                              onChange={e => setEntry({...entry, location: e.target.value})} 
+                              className="block w-full rounded-2xl border-slate-200 p-5 border bg-slate-50/50 input-focus outline-none transition-all font-bold text-slate-700" 
+                            />
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Wetter</label>
-                            <select value={entry.weather} onChange={e => setEntry({...entry, weather: e.target.value as any})} className="block w-full rounded-lg border-gray-300 p-3 border">
-                                {Object.values(WeatherCondition).map(w => <option key={w} value={w}>{w}</option>)}
-                            </select>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="bg-white p-8 rounded-[2rem] shadow-soft border border-slate-100">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Wetter</label>
+                            <div className="relative">
+                              <select 
+                                value={entry.weather} 
+                                onChange={e => setEntry({...entry, weather: e.target.value as any})} 
+                                className="block w-full appearance-none rounded-2xl border-slate-200 p-5 border bg-slate-50/50 input-focus outline-none transition-all font-bold text-slate-700"
+                              >
+                                  {Object.values(WeatherCondition).map(w => <option key={w} value={w}>{w}</option>)}
+                              </select>
+                              <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                              </div>
+                            </div>
                         </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Tätigkeit</label>
-                            <select value={entry.activityType} onChange={e => setEntry({...entry, activityType: e.target.value as any})} className="block w-full rounded-lg border-gray-300 p-3 border">
-                                <option value="Tiefbau">Tiefbau</option>
-                                <option value="Einblasen">Einblasen</option>
-                                <option value="Spleißen">Spleißen</option>
-                                <option value="Hausanschluss">Hausanschluss</option>
-                                <option value="Sonstiges">Sonstiges</option>
-                            </select>
+                        <div className="bg-white p-8 rounded-[2rem] shadow-soft border border-slate-100">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Tätigkeit</label>
+                            <div className="relative">
+                              <select 
+                                value={entry.activityType} 
+                                onChange={e => setEntry({...entry, activityType: e.target.value as any})} 
+                                className="block w-full appearance-none rounded-2xl border-slate-200 p-5 border bg-slate-50/50 input-focus outline-none transition-all font-bold text-slate-700"
+                              >
+                                  <option value="Tiefbau">Tiefbau</option>
+                                  <option value="Einblasen">Einblasen</option>
+                                  <option value="Spleißen">Spleißen</option>
+                                  <option value="Hausanschluss">Hausanschluss</option>
+                                  <option value="Sonstiges">Sonstiges</option>
+                              </select>
+                              <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                              </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-brand-50 p-4 rounded-xl border border-brand-100">
-                    <div className="flex justify-between items-center mb-2">
-                        <label className="block text-sm font-bold text-brand-800">Tätigkeitsbericht</label>
-                        <button type="button" onClick={async () => {
-                            if (entry.images.length === 0) return alert("Zuerst Fotos machen.");
-                            setIsAnalyzingImages(true);
-                            try {
-                                const text = await geminiService.analyzeImagesForReport(entry.images, entry.activityType);
-                                setEntry(prev => ({ ...prev, description: prev.description ? prev.description + "\n" + text : text }));
-                            } finally { setIsAnalyzingImages(false); }
-                        }} className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded-full flex items-center shadow-sm hover:bg-brand-700">
-                            {isAnalyzingImages ? "KI analysiert..." : <><PhotoSparklesIcon /> KI-Unterstützung</>}
+                {/* Activity Report Section */}
+                <div className="bg-white p-8 rounded-[2rem] shadow-soft border border-slate-100">
+                    <div className="flex justify-between items-center mb-5">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Tätigkeitsbericht</label>
+                        <div className="flex gap-2">
+                            <button 
+                              type="button" 
+                              onClick={handleAnalyzeImages} 
+                              className="text-[10px] bg-brand-primary text-white px-4 py-2 rounded-full flex items-center font-black shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all active:scale-95"
+                            >
+                                {isAnalyzingImages ? (
+                                  <span className="flex items-center gap-2">
+                                    <svg className="animate-spin h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    KI analysiert...
+                                  </span>
+                                ) : <><PhotoSparklesIcon /> KI-Analyse</>}
+                            </button>
+                            <button 
+                              type="button" 
+                              onClick={handleEnhanceText} 
+                              className="text-[10px] bg-slate-800 text-white px-4 py-2 rounded-full flex items-center font-black shadow-lg shadow-slate-800/20 hover:bg-slate-900 transition-all active:scale-95"
+                            >
+                                {isEnhancingText ? (
+                                  <span className="flex items-center gap-2">
+                                    <svg className="animate-spin h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    KI verbessert...
+                                  </span>
+                                ) : <><MagicWandIcon /> Verbessern</>}
+                            </button>
+                        </div>
+                    </div>
+                    <textarea 
+                      rows={6} 
+                      required 
+                      placeholder="Beschreiben Sie die heute durchgeführten Arbeiten..." 
+                      value={entry.description} 
+                      onChange={e => setEntry({...entry, description: e.target.value})} 
+                      className="block w-full rounded-2xl border-slate-200 p-5 border bg-slate-50/50 input-focus outline-none transition-all text-slate-700 min-h-[180px] leading-relaxed" 
+                    />
+                </div>
+
+                {/* Missing Work Section */}
+                <div className="bg-white p-8 rounded-[2rem] shadow-soft border border-slate-100">
+                    <div className="flex justify-between items-center mb-5">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Restarbeiten / Fehlende Leistungen</label>
+                        <button 
+                          type="button" 
+                          onClick={handleGenerateMissing} 
+                          className="text-[10px] bg-slate-100 text-slate-600 px-4 py-2 rounded-full flex items-center font-black border border-slate-200 hover:bg-slate-200 transition-all active:scale-95"
+                        >
+                            {isGeneratingMissing ? (
+                              <span className="flex items-center gap-2">
+                                <svg className="animate-spin h-3 w-3 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                KI schlägt vor...
+                              </span>
+                            ) : <><InfoIcon /> KI-Vorschläge</>}
                         </button>
                     </div>
-                    <textarea rows={6} required placeholder="Was wurde heute erledigt?" value={entry.description} onChange={e => setEntry({...entry, description: e.target.value})} className="block w-full rounded-lg border-gray-300 p-3 border focus:ring-2 focus:ring-brand-100" />
+                    <textarea 
+                      rows={3} 
+                      placeholder="Welche Arbeiten müssen noch erledigt werden?" 
+                      value={entry.missingWork} 
+                      onChange={e => setEntry({...entry, missingWork: e.target.value})} 
+                      className="block w-full rounded-2xl border-slate-200 p-5 border bg-slate-50/50 input-focus outline-none transition-all text-slate-700 min-h-[100px] leading-relaxed" 
+                    />
                 </div>
 
-                <div className="border p-4 rounded-xl bg-gray-50/50">
-                    <label className="block text-sm font-bold text-brand-800 mb-3">Materialliste</label>
-                    <div className="flex gap-2 mb-4 items-center">
-                        <input 
-                            type="text" 
-                            list="material-options"
-                            placeholder="Material" 
-                            value={materialInput.name} 
-                            onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} 
-                            className="flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-100 outline-none bg-white" 
-                        />
-                        <datalist id="material-options">
-                            {MATERIAL_OPTIONS.map(opt => <option key={opt} value={opt} />)}
-                        </datalist>
-                        <div className="flex items-center border border-gray-300 rounded-lg bg-white overflow-hidden w-24 focus-within:ring-2 focus-within:ring-brand-100">
+                {/* Material List Section */}
+                <div className="bg-white p-8 rounded-[2rem] shadow-soft border border-slate-100">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-5 ml-1">Materialliste</label>
+                    <div className="flex flex-col sm:flex-row gap-3 mb-8 items-stretch sm:items-center">
+                        <div className="flex-1 relative">
                             <input 
                                 type="text" 
-                                placeholder="Menge" 
+                                list="material-options"
+                                placeholder="Material suchen..." 
+                                value={materialInput.name} 
+                                onChange={e => setMaterialInput({ ...materialInput, name: e.target.value })} 
+                                className="w-full p-4 border border-slate-200 rounded-2xl text-sm input-focus outline-none bg-slate-50/50 transition-all font-medium" 
+                            />
+                            <datalist id="material-options">
+                                {MATERIAL_OPTIONS.map(opt => <option key={opt} value={opt} />)}
+                            </datalist>
+                        </div>
+                        <div className="flex items-center border border-slate-200 rounded-2xl bg-slate-50/50 overflow-hidden w-full sm:w-32 focus-within:ring-4 focus-within:ring-brand-primary/10 focus-within:border-brand-primary transition-all">
+                            <input 
+                                type="text" 
+                                placeholder="0" 
                                 value={materialInput.amount} 
                                 onChange={e => setMaterialInput({ ...materialInput, amount: e.target.value })} 
                                 onFocus={e => e.target.select()}
-                                className="w-full p-2 text-sm border-none focus:ring-0 outline-none" 
+                                className="w-full p-4 text-sm border-none focus:ring-0 outline-none bg-transparent text-center font-bold text-slate-700" 
                             />
-                            <span className="pr-2 text-xs font-bold text-gray-400 select-none">ST</span>
+                            <span className="pr-4 text-[10px] font-black text-slate-400 select-none">ST</span>
                         </div>
-                        <button type="button" onClick={() => {
+                        <button 
+                          type="button" 
+                          onClick={() => {
                             if (!materialInput.name || !materialInput.amount) return;
                             setEntry(prev => ({ ...prev, materials: [...prev.materials, { name: materialInput.name, amount: `${materialInput.amount} ST` }] }));
                             setMaterialInput({ name: '', amount: '1' });
-                        }} className="p-2.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors flex-shrink-0">
+                          }} 
+                          className="p-4 bg-brand-primary text-white rounded-2xl hover:bg-brand-primary/90 transition-all active:scale-95 shadow-lg shadow-brand-primary/20 flex items-center justify-center"
+                        >
                             <PlusIcon />
                         </button>
                     </div>
-                    <div className="space-y-2">
+                    <div className="space-y-3">
+                        {entry.materials.length === 0 && (
+                          <div className="text-center py-12 border-2 border-dashed border-slate-100 rounded-[2rem] bg-slate-50/30">
+                            <div className="mx-auto w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-300 mb-3">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-bold uppercase tracking-widest">Kein Material hinzugefügt</p>
+                          </div>
+                        )}
                         {entry.materials.map((m, idx) => (
-                            <div key={idx} className="flex justify-between items-center bg-white p-2 rounded-lg border text-sm shadow-sm">
-                                <span><span className="font-bold text-brand-700">{m.amount}</span> - {m.name}</span>
-                                <button type="button" onClick={() => setEntry(prev => ({ ...prev, materials: prev.materials.filter((_, i) => i !== idx) }))} className="text-red-500"><TrashIcon /></button>
+                            <div key={idx} className="flex justify-between items-center bg-white p-5 rounded-2xl border border-slate-100 text-sm group hover:border-brand-primary/30 hover:shadow-soft transition-all animate-fade-in">
+                                <div className="flex items-center gap-4">
+                                  <span className="bg-brand-primary/5 text-brand-primary font-black px-4 py-1.5 rounded-xl text-[11px] border border-brand-primary/10">{m.amount}</span>
+                                  <span className="font-bold text-slate-700">{m.name}</span>
+                                </div>
+                                <button 
+                                  type="button" 
+                                  onClick={() => setEntry(prev => ({ ...prev, materials: prev.materials.filter((_, i) => i !== idx) }))} 
+                                  className="text-slate-300 hover:text-red-500 p-2 hover:bg-red-50 rounded-xl transition-all"
+                                >
+                                  <TrashIcon />
+                                </button>
                             </div>
                         ))}
                     </div>
                 </div>
 
-                <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-3">Fotodokumentation ({entry.images.length})</label>
-                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
+                {/* Photo Documentation Section */}
+                <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+                    <div className="flex justify-between items-center mb-4">
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Fotodokumentation</label>
+                      <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-2 py-1 rounded-md">{entry.images.length} BILDER</span>
+                    </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-4">
                         {entry.images.map((f, i) => (
-                            <div key={i} className="relative aspect-square border rounded-lg overflow-hidden group shadow-sm">
-                                <img src={URL.createObjectURL(f)} className="w-full h-full object-cover" />
-                                <button type="button" onClick={() => setEntry({...entry, images: entry.images.filter((_, idx) => idx !== i)})} className="absolute top-0 right-0 bg-red-500 text-white p-1 rounded-bl opacity-0 group-hover:opacity-100"><TrashIcon /></button>
+                            <div key={i} className="relative aspect-square border border-slate-100 rounded-2xl overflow-hidden group shadow-sm hover:shadow-md transition-all">
+                                <img src={URL.createObjectURL(f)} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <button 
+                                    type="button" 
+                                    onClick={() => setEntry({...entry, images: entry.images.filter((_, idx) => idx !== i)})} 
+                                    className="bg-red-500 text-white p-2 rounded-xl hover:scale-110 transition-transform"
+                                  >
+                                    <TrashIcon />
+                                  </button>
+                                </div>
                             </div>
                         ))}
-                        <label className="aspect-square flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-all">
-                            <CameraIcon />
-                            <span className="text-[10px] text-gray-400 mt-1">Foto</span>
-                            <input type="file" accept="image/*" capture="environment" multiple onChange={e => e.target.files && setEntry({...entry, images: [...entry.images, ...Array.from(e.target.files)]})} className="hidden" />
+                        <label className="aspect-square border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:border-brand-400 hover:bg-brand-50/30 transition-all group">
+                            <div className="p-3 bg-slate-50 rounded-2xl text-slate-400 group-hover:text-brand-600 group-hover:bg-brand-100 transition-all">
+                              <CameraIcon />
+                            </div>
+                            <span className="text-[10px] font-bold text-slate-400 mt-2 uppercase tracking-widest group-hover:text-brand-600">Foto hinzufügen</span>
+                            <input type="file" multiple accept="image/*" capture="environment" onChange={handleImageAdd} className="hidden" />
                         </label>
                     </div>
                 </div>
 
-                <div className="pt-6 border-t">
-                    <Button type="submit" className="w-full py-4 text-xl font-bold shadow-lg">Bericht Absenden</Button>
+                {/* Submit Section */}
+                <div className="pt-6">
+                  <Button 
+                    type="submit" 
+                    className="w-full py-6 text-xl font-black rounded-3xl shadow-xl shadow-brand-primary/30 active:scale-[0.98] transition-transform"
+                  >
+                      BERICHT ABSCHLIESSEN
+                  </Button>
+                  <p className="text-center text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-6">
+                    IT-KOM Bautagebuch System v1.2.6
+                  </p>
                 </div>
             </form>
         </div>
@@ -563,7 +1013,23 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
             <div className="bg-white rounded-2xl p-6 w-full max-w-6xl max-h-[90vh] overflow-y-auto shadow-2xl relative">
                 <div className="flex justify-between items-center mb-6 border-b pb-4">
-                    <h3 className="text-2xl font-bold text-brand-900">Administration</h3>
+                    <div className="flex items-center gap-6">
+                        <h3 className="text-2xl font-bold text-brand-900">Administration</h3>
+                        <nav className="flex gap-1 bg-slate-100 p-1 rounded-xl">
+                            <button 
+                                onClick={() => setActiveAdminTab('general')}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeAdminTab === 'general' ? 'bg-white text-brand-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                Konfiguration
+                            </button>
+                            <button 
+                                onClick={() => setActiveAdminTab('material')}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeAdminTab === 'material' ? 'bg-white text-brand-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                Material-Auswertung
+                            </button>
+                        </nav>
+                    </div>
                     <div className="flex items-center gap-2">
                         <button 
                             onClick={() => setShowHelp(!showHelp)} 
@@ -575,61 +1041,129 @@ export default function App() {
                     </div>
                 </div>
                 
-                {showHelp && (
-                    <div className="mb-8 p-6 bg-orange-50 rounded-2xl border border-orange-100 animate-in fade-in slide-in-from-top-4 duration-300">
-                        <div className="flex items-start gap-4">
-                            <div className="p-3 bg-white rounded-xl shadow-sm">
-                                <InfoIcon />
-                            </div>
-                            <div className="flex-1">
-                                <h4 className="text-lg font-bold text-orange-900 mb-2">Nextcloud CORS Konfiguration</h4>
-                                <p className="text-sm text-orange-800 mb-4 leading-relaxed">
-                                    Damit die App Berichte in deine Nextcloud hochladen kann, musst du Cross-Origin Resource Sharing (CORS) erlauben. 
-                                    Füge den folgenden Code am Ende der <strong>.htaccess</strong> Datei im Hauptverzeichnis deiner Nextcloud-Installation hinzu:
-                                </p>
-                                <div className="relative group">
-                                    <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-[11px] font-mono overflow-x-auto border-4 border-gray-800 shadow-inner">
-{`# CORS FÜR BAUTAGEBUCH APP
-<IfModule mod_headers.c>
-    Header always set Access-Control-Allow-Origin "*"
-    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, MKCOL, PROPFIND"
-    Header always set Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With, Range"
-    Header always set Access-Control-Expose-Headers "Content-Location, Location"
-
-    RewriteEngine On
-    RewriteCond %{REQUEST_METHOD} OPTIONS
-    RewriteRule ^(.*)$ $1 [R=200,L]
-</IfModule>`}
-                                    </pre>
-                                    <button 
-                                        onClick={() => {
-                                            const code = `# CORS FÜR BAUTAGEBUCH APP\n<IfModule mod_headers.c>\n    Header always set Access-Control-Allow-Origin "*"\n    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, MKCOL, PROPFIND"\n    Header always set Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With, Range"\n    Header always set Access-Control-Expose-Headers "Content-Location, Location"\n\n    RewriteEngine On\n    RewriteCond %{REQUEST_METHOD} OPTIONS\n    RewriteRule ^(.*)$ $1 [R=200,L]\n</IfModule>`;
-                                            navigator.clipboard.writeText(code);
-                                            alert("Code wurde in die Zwischenablage kopiert.");
-                                        }}
-                                        className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 text-white text-[10px] px-2 py-1 rounded border border-white/20"
-                                    >
-                                        Code kopieren
-                                    </button>
+                {activeAdminTab === 'material' ? (
+                    <div className="animate-fade-in space-y-8">
+                        <div className="bg-slate-50 p-8 rounded-3xl border border-slate-200">
+                            <h4 className="text-lg font-bold text-slate-900 mb-6">Zeitraum auswählen</h4>
+                            <div className="flex flex-col md:flex-row gap-6 items-end">
+                                <div className="flex-1 space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Von</label>
+                                    <input 
+                                        type="date" 
+                                        value={analysisStartDate} 
+                                        onChange={e => setAnalysisStartDate(e.target.value)}
+                                        className="w-full p-4 border rounded-2xl font-bold text-slate-700 outline-none focus:ring-4 focus:ring-brand-primary/10" 
+                                    />
                                 </div>
-                                <p className="mt-4 text-[12px] text-orange-700 italic">
-                                    Hinweis: Die Änderung greift sofort. Falls du Fehlermeldungen beim Upload erhältst, prüfe ob das <strong>"Bearbeiten erlauben"</strong> Häkchen beim Nextcloud-Share gesetzt ist.
-                                </p>
+                                <div className="flex-1 space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Bis</label>
+                                    <input 
+                                        type="date" 
+                                        value={analysisEndDate} 
+                                        onChange={e => setAnalysisEndDate(e.target.value)}
+                                        className="w-full p-4 border rounded-2xl font-bold text-slate-700 outline-none focus:ring-4 focus:ring-brand-primary/10" 
+                                    />
+                                </div>
+                                <Button onClick={handleAnalyzeMaterials} disabled={isAnalyzing} className="px-10 py-4">
+                                    {isAnalyzing ? 'Analysiere...' : 'Auswerten'}
+                                </Button>
                             </div>
                         </div>
-                    </div>
-                )}
 
-                <div className="grid lg:grid-cols-3 gap-8">
+                        {analysisResults.length > 0 && (
+                            <div className="space-y-6">
+                                <div className="flex justify-between items-center">
+                                    <h4 className="text-lg font-bold text-slate-900">Ergebnisse</h4>
+                                    <Button onClick={exportMaterialPdf} variant="outline" className="text-xs">
+                                        <DownloadIcon /> Als PDF exportieren
+                                    </Button>
+                                </div>
+                                <div className="bg-white border rounded-3xl overflow-hidden shadow-sm">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead>
+                                            <tr className="bg-slate-50 border-b">
+                                                <th className="p-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Material</th>
+                                                <th className="p-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Menge</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {analysisResults.map((r, i) => (
+                                                <tr key={i} className="border-b last:border-0 hover:bg-slate-50/50 transition-colors">
+                                                    <td className="p-5 font-bold text-slate-700">{r.name}</td>
+                                                    <td className="p-5 text-right font-black text-brand-primary">
+                                                        <span className="bg-brand-primary/5 px-3 py-1 rounded-lg border border-brand-primary/10">{r.amount} ST</span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {analysisResults.length === 0 && !isAnalyzing && (
+                            <div className="text-center py-20 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
+                                <p className="text-slate-400 font-bold uppercase tracking-widest">Keine Daten für diesen Zeitraum gefunden</p>
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <>
+                        {showHelp && (
+                            <div className="mb-8 p-6 bg-orange-50 rounded-2xl border border-orange-100 animate-in fade-in slide-in-from-top-4 duration-300">
+                                <div className="flex items-start gap-4">
+                                    <div className="p-3 bg-white rounded-xl shadow-sm">
+                                        <InfoIcon />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h4 className="text-lg font-bold text-orange-900 mb-2">Nextcloud CORS Konfiguration</h4>
+                                        <p className="text-sm text-orange-800 mb-4 leading-relaxed">
+                                            Damit die App Berichte in deine Nextcloud hochladen kann, musst du Cross-Origin Resource Sharing (CORS) erlauben. 
+                                            Füge den folgenden Code am Ende der <strong>.htaccess</strong> Datei im Hauptverzeichnis deiner Nextcloud-Installation hinzu:
+                                        </p>
+                                        <div className="relative group">
+                                            <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-[11px] font-mono overflow-x-auto border-4 border-gray-800 shadow-inner">
+        {`# CORS FÜR BAUTAGEBUCH APP
+        <IfModule mod_headers.c>
+            Header always set Access-Control-Allow-Origin "*"
+            Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, MKCOL, PROPFIND"
+            Header always set Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With, Range"
+            Header always set Access-Control-Expose-Headers "Content-Location, Location"
+        
+            RewriteEngine On
+            RewriteCond %{REQUEST_METHOD} OPTIONS
+            RewriteRule ^(.*)$ $1 [R=200,L]
+        </IfModule>`}
+                                            </pre>
+                                            <button 
+                                                onClick={() => {
+                                                    const code = `# CORS FÜR BAUTAGEBUCH APP\n<IfModule mod_headers.c>\n    Header always set Access-Control-Allow-Origin "*"\n    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, MKCOL, PROPFIND"\n    Header always set Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With, Range"\n    Header always set Access-Control-Expose-Headers "Content-Location, Location"\n\n    RewriteEngine On\n    RewriteCond %{REQUEST_METHOD} OPTIONS\n    RewriteRule ^(.*)$ $1 [R=200,L]\n</IfModule>`;
+                                                    navigator.clipboard.writeText(code);
+                                                    alert("Code wurde in die Zwischenablage kopiert.");
+                                                }}
+                                                className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 text-white text-[10px] px-2 py-1 rounded border border-white/20"
+                                            >
+                                                Code kopieren
+                                            </button>
+                                        </div>
+                                        <p className="mt-4 text-[12px] text-orange-700 italic">
+                                            Hinweis: Die Änderung greift sofort. Falls du Fehlermeldungen beim Upload erhältst, prüfe ob das <strong>"Bearbeiten erlauben"</strong> Häkchen beim Nextcloud-Share gesetzt ist.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="grid lg:grid-cols-3 gap-8">
                     {/* Firmenlogo & Backup */}
                     <div className="space-y-6">
                         <div className="space-y-4">
-                            <h4 className="text-xs font-bold uppercase text-brand-600">Logo & Design</h4>
+                            <h4 className="text-xs font-bold uppercase text-brand-primary">Logo & Design</h4>
                             <div className="bg-gray-50 p-6 rounded-xl border text-center">
                                 <div className="flex justify-center mb-6 bg-white p-4 rounded-lg border border-dashed items-center min-h-[120px]">
                                     <Logo className="h-20 w-auto" src={config.logo} />
                                 </div>
-                                <label className="block w-full py-2 px-4 bg-brand-600 text-white rounded-lg cursor-pointer hover:bg-brand-700 text-sm font-bold mb-2">
+                                <label className="block w-full py-2 px-4 bg-brand-primary text-white rounded-lg cursor-pointer hover:bg-brand-primary/90 text-sm font-bold mb-2">
                                     Neues Logo hochladen
                                     <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
                                 </label>
@@ -656,7 +1190,7 @@ export default function App() {
 
                     {/* Projekte */}
                     <div className="space-y-4">
-                        <h4 className="text-xs font-bold uppercase text-brand-600">Projekte (Nextcloud)</h4>
+                        <h4 className="text-xs font-bold uppercase text-brand-primary">Projekte (Nextcloud)</h4>
                         <div className="space-y-2 mb-4 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
                             {config.projects.length === 0 && <p className="text-xs text-gray-400 text-center py-4">Keine Projekte angelegt.</p>}
                             {config.projects.map(p => (
@@ -680,7 +1214,7 @@ export default function App() {
 
                     {/* Technikerverwaltung */}
                     <div className="space-y-4">
-                        <h4 className="text-xs font-bold uppercase text-brand-600">Techniker & Passwörter</h4>
+                        <h4 className="text-xs font-bold uppercase text-brand-primary">Techniker & Passwörter</h4>
                         <div className="space-y-2 mb-4 max-h-64 overflow-y-auto border rounded-lg p-2 bg-gray-50">
                             {config.technicians.map(t => (
                                 <div key={t.id} className={`flex flex-col p-2 bg-white rounded border text-sm shadow-sm ${editingTechId === t.id ? 'border-brand-500 bg-brand-50' : 'border-gray-100'}`}>
@@ -737,7 +1271,9 @@ export default function App() {
                             }} variant="secondary" className="w-full py-1 text-xs">Techniker hinzufügen</Button>
                         </div>
                     </div>
-                </div>
+                        </div>
+                    </>
+                )}
                 
                 <div className="pt-6 mt-8 border-t flex justify-between items-center">
                     <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Verwaltungskonsole v1.2.6</p>
