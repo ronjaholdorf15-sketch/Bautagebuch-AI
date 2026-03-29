@@ -368,26 +368,19 @@ export default function App() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Check if it's the master admin login via code
-    if (loginCode.toUpperCase() === 'ADMIN' && loginPassword === 'admin123') {
-        const adminTech = config.technicians.find(t => t.code.toUpperCase() === 'ADMIN');
-        if (adminTech) {
-            setCurrentUser(adminTech);
-            setEntry(prev => ({ ...prev, technician: adminTech.name }));
-            setStatus({ step: 'form' });
-            return;
-        }
-    }
-
     try {
         const provider = new GoogleAuthProvider();
         const result = await signInWithPopup(auth, provider);
         const user = result.user;
         
-        // Find technician by email
+        // Find technician by code
         const tech = config.technicians.find(t => t.code.toUpperCase() === loginCode.toUpperCase());
         if (tech) {
-            if (tech.password && tech.password !== loginPassword) { alert("Falsches Passwort."); return; }
+            if (tech.password && tech.password !== loginPassword) { 
+                alert("Falsches Passwort."); 
+                await signOut(auth);
+                return; 
+            }
             
             // 1. Create/Update User Document in Firestore
             try {
@@ -399,7 +392,6 @@ export default function App() {
                 }, { merge: true });
             } catch (e: any) {
                 console.error("Failed to sync user to Firestore", e);
-                // We continue even if this fails, but it might cause permission issues later
             }
 
             setCurrentUser(tech);
@@ -525,10 +517,15 @@ export default function App() {
       
       // 1. Save to Firestore (Central Database)
       setUploadMessage("Speichere in Datenbank...");
+      
+      if (!auth.currentUser) {
+        throw new Error("Nicht bei Google angemeldet. Bitte loggen Sie sich erneut ein.");
+      }
+
       try {
         const firestoreEntry = {
           ...entry,
-          technicianUid: auth.currentUser?.uid || 'anonymous',
+          technicianUid: auth.currentUser.uid,
           createdAt: serverTimestamp(),
           images: [] 
         };
