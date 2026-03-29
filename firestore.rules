@@ -46,7 +46,8 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
          (request.auth.token.email == "ronja.holdorf15@gmail.com" && request.auth.token.email_verified == true));
     }
 
@@ -58,7 +59,9 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'email', 'role']) &&
              data.uid is string &&
              data.email is string &&
-             data.role in ['admin', 'user'];
+             data.role in ['admin', 'user'] &&
+             data.uid.size() > 0 &&
+             data.email.size() > 0;
     }
 
     function isValidDiaryEntry(data) {
@@ -67,7 +70,9 @@ service cloud.firestore {
              data.location is string &&
              data.technician is string &&
              data.technicianUid is string &&
-             data.createdAt is timestamp;
+             data.createdAt is timestamp &&
+             data.location.size() > 0 &&
+             data.technician.size() > 0;
     }
 
     // ===============================================================

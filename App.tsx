@@ -22,7 +22,9 @@ import {
   getDocs, 
   serverTimestamp,
   Timestamp,
-  orderBy
+  orderBy,
+  setDoc,
+  doc
 } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
@@ -147,6 +149,57 @@ const MATERIAL_OPTIONS = [
   "(10072149) NE 5 - Installation S",
   "(10072159) NE 5 - Installation M"
 ];
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export default function App() {
   const [config, setConfig] = useState<AppConfig>({ technicians: [], projects: [] });
@@ -335,6 +388,20 @@ export default function App() {
         const tech = config.technicians.find(t => t.code.toUpperCase() === loginCode.toUpperCase());
         if (tech) {
             if (tech.password && tech.password !== loginPassword) { alert("Falsches Passwort."); return; }
+            
+            // 1. Create/Update User Document in Firestore
+            try {
+                await setDoc(doc(db, 'users', user.uid), {
+                    uid: user.uid,
+                    email: user.email,
+                    role: tech.role,
+                    name: tech.name
+                }, { merge: true });
+            } catch (e: any) {
+                console.error("Failed to sync user to Firestore", e);
+                // We continue even if this fails, but it might cause permission issues later
+            }
+
             setCurrentUser(tech);
             setEntry(prev => ({ ...prev, technician: tech.name, technicianUid: user.uid }));
             setStatus({ step: 'form' });
@@ -467,7 +534,7 @@ export default function App() {
         };
         await addDoc(collection(db, 'diaryEntries'), firestoreEntry);
       } catch (e: any) {
-        throw new Error(`Fehler beim Speichern in der Datenbank: ${e.message}`);
+        handleFirestoreError(e, OperationType.CREATE, 'diaryEntries');
       }
 
       // 2. Generate PDF
