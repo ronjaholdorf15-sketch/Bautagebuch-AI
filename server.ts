@@ -32,10 +32,15 @@ app.post("/api/nextcloud/upload", upload.fields([
     if (baseUrl.endsWith('/index.php')) {
       baseUrl = baseUrl.substring(0, baseUrl.length - 10);
     }
+    // Remove trailing slash from baseUrl if present
+    if (baseUrl.endsWith('/')) {
+      baseUrl = baseUrl.substring(0, baseUrl.length - 1);
+    }
+    
     const webDavUrl = `${baseUrl}/public.php/webdav`;
     
     const authHeader = `Basic ${Buffer.from(`${projectToken}:`).toString('base64')}`;
-    console.log(`Auth-Header erstellt (Base64 Länge: ${authHeader.length})`);
+    console.log(`Nextcloud Request: Base=${baseUrl}, Token=${projectToken.substring(0, 3)}...`);
     
     const commonHeaders = { 
       'Authorization': authHeader,
@@ -46,14 +51,18 @@ app.post("/api/nextcloud/upload", upload.fields([
 
     // Test-Verbindung: Prüfen ob der Token gültig ist
     if (test === 'true') {
-      console.log(`Test-Verbindung für: ${baseUrl}`);
+      console.log(`Test-Verbindung für: ${webDavUrl}`);
       try {
         const response = await fetch(webDavUrl, {
           method: 'PROPFIND',
           headers: { ...commonHeaders, 'Depth': '0' }
         });
         
+        console.log(`Test-Verbindung Status: ${response.status} ${response.statusText}`);
+        
         if (!response.ok) {
+          const body = await response.text();
+          console.error(`Test-Verbindung fehlgeschlagen Body: ${body.substring(0, 200)}`);
           throw new Error(`Nextcloud returned ${response.status}: ${response.statusText}`);
         }
         
@@ -78,7 +87,7 @@ app.post("/api/nextcloud/upload", upload.fields([
     const targetFolderUrl = `${webDavUrl}/${encodedFolderName}`;
     const targetFolderUrlWithSlash = `${targetFolderUrl}/`;
     
-    console.log(`Starte Upload nach Nextcloud. Base: ${baseUrl}, Folder: ${folderName}`);
+    console.log(`Starte Upload. Ziel-Ordner: ${targetFolderUrlWithSlash}`);
 
     // 1. Ordner erstellen (MKCOL)
     try {
@@ -87,6 +96,8 @@ app.post("/api/nextcloud/upload", upload.fields([
         headers: commonHeaders
       });
       
+      console.log(`MKCOL Status: ${mkcolRes.status} ${mkcolRes.statusText}`);
+      
       if (mkcolRes.status === 405) {
         console.log(`Ordner existiert bereits: ${folderName}`);
       } else if (mkcolRes.status === 403) {
@@ -94,7 +105,8 @@ app.post("/api/nextcloud/upload", upload.fields([
         console.error(errorMsg);
         return res.status(403).json({ error: "Berechtigungsfehler", details: errorMsg });
       } else if (!mkcolRes.ok) {
-        console.warn(`Ordner-Erstellung Warnung: ${mkcolRes.status} ${mkcolRes.statusText}`);
+        const body = await mkcolRes.text();
+        console.warn(`Ordner-Erstellung Warnung: ${mkcolRes.status} ${body.substring(0, 100)}`);
       } else {
         console.log(`Ordner erstellt: ${folderName}`);
       }
@@ -105,8 +117,10 @@ app.post("/api/nextcloud/upload", upload.fields([
     // 2. PDF hochladen
     if (pdfFile) {
       const encodedPdfFilename = encodeURIComponent(pdfFilename);
-      console.log(`Lade PDF hoch: ${pdfFilename}`);
-      const pdfRes = await fetch(`${targetFolderUrl}/${encodedPdfFilename}`, {
+      const pdfUrl = `${targetFolderUrl}/${encodedPdfFilename}`;
+      console.log(`Lade PDF hoch: ${pdfUrl}`);
+      
+      const pdfRes = await fetch(pdfUrl, {
         method: 'PUT',
         headers: {
           ...commonHeaders,
@@ -115,7 +129,12 @@ app.post("/api/nextcloud/upload", upload.fields([
         body: pdfFile.buffer as any
       });
       
+      console.log(`PDF PUT Status: ${pdfRes.status} ${pdfRes.statusText}`);
+      
       if (!pdfRes.ok) {
+        const body = await pdfRes.text();
+        console.error(`PDF Upload Fehler Body: ${body.substring(0, 200)}`);
+        
         if (pdfRes.status === 403) {
           return res.status(403).json({ 
             error: "Berechtigungsfehler", 
@@ -129,8 +148,10 @@ app.post("/api/nextcloud/upload", upload.fields([
     // 3. Bilder hochladen
     for (const img of imageFiles) {
       const encodedImgName = encodeURIComponent(img.originalname);
-      console.log(`Lade Bild hoch: ${img.originalname}`);
-      const imgRes = await fetch(`${targetFolderUrl}/${encodedImgName}`, {
+      const imgUrl = `${targetFolderUrl}/${encodedImgName}`;
+      console.log(`Lade Bild hoch: ${imgUrl}`);
+      
+      const imgRes = await fetch(imgUrl, {
         method: 'PUT',
         headers: {
           ...commonHeaders,
@@ -139,8 +160,11 @@ app.post("/api/nextcloud/upload", upload.fields([
         body: img.buffer as any
       });
       
+      console.log(`Bild PUT Status: ${imgRes.status} ${imgRes.statusText}`);
+      
       if (!imgRes.ok) {
-        console.error(`Bild-Upload fehlgeschlagen: ${img.originalname} (${imgRes.status})`);
+        const body = await imgRes.text();
+        console.error(`Bild-Upload fehlgeschlagen: ${img.originalname} (${imgRes.status}) - ${body.substring(0, 100)}`);
       }
     }
 
