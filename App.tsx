@@ -19,6 +19,7 @@ import {
   query, 
   where, 
   getDocs, 
+  getDoc,
   serverTimestamp,
   Timestamp,
   orderBy,
@@ -261,12 +262,32 @@ export default function App() {
 
   // Load configuration on mount
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
+      if (user && !currentUser) {
+        try {
+          // Try to restore user from Firestore
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            const tech: Technician = {
+              id: user.uid,
+              name: userData.name || 'Benutzer',
+              code: userData.email?.split('@')[0]?.toUpperCase() || 'USER',
+              role: userData.role || 'user'
+            };
+            setCurrentUser(tech);
+            setEntry(prev => ({ ...prev, technician: tech.name, technicianUid: user.uid }));
+            setStatus({ step: 'form' });
+          }
+        } catch (e) {
+          console.error("Auth restoration failed:", e);
+        }
+      }
       setIsAuthReady(true);
     });
     return () => unsubscribe();
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -276,8 +297,8 @@ export default function App() {
     }
     
     // Ensure admin account with code 'ADMIN' exists
-    const adminExists = loadedConfig.technicians.some(t => t.code.toUpperCase() === 'ADMIN');
-    if (!adminExists) {
+    const adminIndex = loadedConfig.technicians.findIndex(t => t.code.toUpperCase() === 'ADMIN');
+    if (adminIndex === -1) {
         loadedConfig.technicians.push({ 
             id: 'admin-init', 
             name: 'Administrator', 
@@ -287,10 +308,10 @@ export default function App() {
         });
         localStorage.setItem(STORAGE_KEY, JSON.stringify(loadedConfig));
     } else {
-        // If it exists, ensure the password is 'admin123' if it's the initial admin
-        const initialAdmin = loadedConfig.technicians.find(t => t.id === 'admin-init');
-        if (initialAdmin && initialAdmin.password !== 'admin123') {
-            initialAdmin.password = 'admin123';
+        // If it exists, ensure the password is 'admin123' if it's the initial admin or if it was empty
+        const admin = loadedConfig.technicians[adminIndex];
+        if (!admin.password || admin.id === 'admin-init' || admin.id === 'admin-fallback') {
+            admin.password = 'admin123';
             localStorage.setItem(STORAGE_KEY, JSON.stringify(loadedConfig));
         }
     }
@@ -367,35 +388,56 @@ export default function App() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // 1. Find technician by code in local config
-    const tech = config.technicians.find(t => t.code.toUpperCase() === loginCode.toUpperCase());
+    const normalizedCode = loginCode.trim().toUpperCase();
+    const normalizedPassword = loginPassword.trim();
+
+    // 1. Master Admin Override
+    if (normalizedCode === 'ADMIN' && normalizedPassword === 'admin123') {
+        const adminTech: Technician = {
+            id: 'admin-master',
+            name: 'Administrator',
+            code: 'ADMIN',
+            password: 'admin123',
+            role: 'admin'
+        };
+        await performFirebaseLogin(adminTech);
+        return;
+    }
+
+    // 2. Find technician by code in local config
+    let tech = config.technicians.find(t => t.code.toUpperCase() === normalizedCode);
     
     if (!tech) {
         alert("Benutzer nicht gefunden. Bitte Kürzel prüfen.");
         return;
     }
 
-    if (tech.password && tech.password !== loginPassword) {
+    if (tech.password && tech.password !== normalizedPassword) {
         alert("Falsches Passwort.");
         return;
     }
 
+    await performFirebaseLogin(tech);
+  };
+
+  const performFirebaseLogin = async (tech: Technician) => {
     try {
-        // 2. Sign in anonymously to Firebase to get a valid session for Firestore
+        // Sign in anonymously to Firebase to get a valid session for Firestore
         const result = await signInAnonymously(auth);
         const user = result.user;
         
-        // 3. Create/Update User Document in Firestore using the anonymous UID
-        // This links the technical session to the technician's role
+        // Create/Update User Document in Firestore using the anonymous UID
         try {
             await setDoc(doc(db, 'users', user.uid), {
                 uid: user.uid,
-                email: `${tech.code.toLowerCase()}@internal.app`, // Placeholder email for schema compatibility
+                email: `${tech.code.toLowerCase()}@internal.app`,
                 role: tech.role,
-                name: tech.name
+                name: tech.name,
+                lastLogin: serverTimestamp()
             }, { merge: true });
         } catch (e: any) {
             console.error("Failed to sync user to Firestore", e);
+            // If this fails, we might have a permission issue or network issue
         }
 
         setCurrentUser(tech);
@@ -403,8 +445,12 @@ export default function App() {
         setStatus({ step: 'form' });
         
     } catch (error) {
-        console.error("Login failed", error);
-        alert("Anmeldung am Datenbank-Server fehlgeschlagen.");
+        console.error("Firebase Login failed", error);
+        // Fallback: allow local login even if Firebase fails, but warn the user
+        setCurrentUser(tech);
+        setEntry(prev => ({ ...prev, technician: tech.name }));
+        setStatus({ step: 'form' });
+        alert("Hinweis: Verbindung zur Datenbank fehlgeschlagen. Speichern ist nur lokal möglich.");
     }
   };
 
@@ -511,6 +557,7 @@ export default function App() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedProjectIndex === -1) { alert("Bitte ein Projekt auswählen."); return; }
+    if (!entry.location.trim()) { alert("Bitte den Einsatzort angeben."); return; }
     const project = config.projects[selectedProjectIndex];
     setUploadError(null);
     try {

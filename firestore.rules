@@ -88,8 +88,7 @@ service cloud.firestore {
 
     match /diaryEntries/{entryId} {
       allow read: if isAuthenticated() && (isDocOwner() || isAdmin());
-      allow create: if isAuthenticated() && isValidDiaryEntry(request.resource.data) && 
-                      request.resource.data.technicianUid == request.auth.uid;
+      allow create: if isAuthenticated() && (isAdmin() || (isValidDiaryEntry(request.resource.data) && request.resource.data.technicianUid == request.auth.uid));
       allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidDiaryEntry(request.resource.data);
       allow delete: if isAdmin();
     }
