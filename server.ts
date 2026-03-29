@@ -2,7 +2,6 @@
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import axios from "axios";
 import path from "path";
 
 const app = express();
@@ -20,7 +19,9 @@ app.post("/api/nextcloud/upload", upload.fields([
   { name: 'images' }
 ]), async (req, res) => {
   try {
-    const { projectLink, projectToken, folderName, pdfFilename, test } = req.body;
+    const projectLink = (req.body.projectLink || "").trim();
+    const projectToken = (req.body.projectToken || "").trim();
+    const { folderName, pdfFilename, test } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     
     if (!projectLink || !projectToken) {
@@ -34,32 +35,34 @@ app.post("/api/nextcloud/upload", upload.fields([
     const webDavUrl = `${baseUrl}/public.php/webdav`;
     
     const authHeader = `Basic ${Buffer.from(`${projectToken}:`).toString('base64')}`;
-    const axiosConfig = {
-      headers: { 
-        'Authorization': authHeader,
-        'User-Agent': 'Bautagebuch-App-Proxy',
-        'Accept': '*/*'
-      },
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
+    console.log(`Auth-Header erstellt (Base64 Länge: ${authHeader.length})`);
+    
+    const commonHeaders = { 
+      'Authorization': authHeader,
+      'User-Agent': 'Bautagebuch-App-Proxy',
+      'Accept': '*/*',
+      'OCS-APIRequest': 'true'
     };
 
     // Test-Verbindung: Prüfen ob der Token gültig ist
     if (test === 'true') {
       console.log(`Test-Verbindung für: ${baseUrl}`);
       try {
-        await axios({
-          ...axiosConfig,
+        const response = await fetch(webDavUrl, {
           method: 'PROPFIND',
-          url: webDavUrl,
-          headers: { ...axiosConfig.headers, 'Depth': '0' }
+          headers: { ...commonHeaders, 'Depth': '0' }
         });
+        
+        if (!response.ok) {
+          throw new Error(`Nextcloud returned ${response.status}: ${response.statusText}`);
+        }
+        
         return res.json({ success: true, message: "Verbindung erfolgreich" });
       } catch (e: any) {
-        console.error("Test-Verbindung Fehler:", e.response?.status, e.response?.data || e.message);
-        return res.status(e.response?.status || 500).json({ 
+        console.error("Test-Verbindung Fehler:", e.message);
+        return res.status(500).json({ 
           error: "Verbindung fehlgeschlagen", 
-          details: e.response?.status === 401 ? "Ungültiger Token oder Link" : (e.response?.statusText || e.message)
+          details: e.message
         });
       }
     }
@@ -79,72 +82,68 @@ app.post("/api/nextcloud/upload", upload.fields([
 
     // 1. Ordner erstellen (MKCOL)
     try {
-      await axios({
+      const mkcolRes = await fetch(targetFolderUrlWithSlash, {
         method: 'MKCOL',
-        url: targetFolderUrlWithSlash,
-        ...axiosConfig
+        headers: commonHeaders
       });
-      console.log(`Ordner erstellt: ${folderName}`);
-    } catch (e: any) {
-      // 405 bedeutet oft, dass der Ordner bereits existiert - das ist okay
-      if (e.response?.status === 405) {
+      
+      if (mkcolRes.status === 405) {
         console.log(`Ordner existiert bereits: ${folderName}`);
-      } else if (e.response?.status === 403) {
+      } else if (mkcolRes.status === 403) {
         console.error("Berechtigungsfehler (403): Prüfen Sie, ob 'Bearbeiten erlauben' in Nextcloud aktiviert ist.");
         throw new Error("Berechtigungsfehler (403): Bitte 'Bearbeiten erlauben' in der Nextcloud-Freigabe aktivieren.");
+      } else if (!mkcolRes.ok) {
+        console.error(`Ordner-Erstellung Fehler: ${mkcolRes.status} ${mkcolRes.statusText}`);
       } else {
-        console.error("Ordner-Erstellung Fehler:", e.response?.status, e.response?.data || e.message);
-        // Wir machen trotzdem weiter, vielleicht klappt der Upload ja
+        console.log(`Ordner erstellt: ${folderName}`);
       }
+    } catch (e: any) {
+      console.error("Ordner-Erstellung Exception:", e.message);
     }
 
     // 2. PDF hochladen
     if (pdfFile) {
       const encodedPdfFilename = encodeURIComponent(pdfFilename);
       console.log(`Lade PDF hoch: ${pdfFilename}`);
-      await axios({
+      const pdfRes = await fetch(`${targetFolderUrl}/${encodedPdfFilename}`, {
         method: 'PUT',
-        url: `${targetFolderUrl}/${encodedPdfFilename}`,
-        data: pdfFile.buffer,
         headers: {
-          ...axiosConfig.headers,
+          ...commonHeaders,
           'Content-Type': 'application/pdf'
         },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity
+        body: pdfFile.buffer as any
       });
+      
+      if (!pdfRes.ok) {
+        throw new Error(`PDF Upload fehlgeschlagen: ${pdfRes.status} ${pdfRes.statusText}`);
+      }
     }
 
     // 3. Bilder hochladen
     for (const img of imageFiles) {
       const encodedImgName = encodeURIComponent(img.originalname);
       console.log(`Lade Bild hoch: ${img.originalname}`);
-      await axios({
+      const imgRes = await fetch(`${targetFolderUrl}/${encodedImgName}`, {
         method: 'PUT',
-        url: `${targetFolderUrl}/${encodedImgName}`,
-        data: img.buffer,
         headers: {
-          ...axiosConfig.headers,
+          ...commonHeaders,
           'Content-Type': img.mimetype
         },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity
+        body: img.buffer as any
       });
+      
+      if (!imgRes.ok) {
+        console.error(`Bild-Upload fehlgeschlagen: ${img.originalname} (${imgRes.status})`);
+      }
     }
 
     console.log("Upload erfolgreich abgeschlossen.");
     res.json({ success: true });
   } catch (error: any) {
-    console.error("Nextcloud Proxy Fehler:");
-    if (error.response) {
-      console.error("Status:", error.response.status);
-      console.error("Data:", error.response.data);
-    } else {
-      console.error("Message:", error.message);
-    }
+    console.error("Nextcloud Proxy Fehler:", error.message);
     res.status(500).json({ 
       error: "Upload fehlgeschlagen", 
-      details: error.response?.statusText || error.message 
+      details: error.message 
     });
   }
 });
