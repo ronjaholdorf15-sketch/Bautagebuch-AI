@@ -33,6 +33,9 @@ export const uploadDiaryEntry = async (
 
   if (!response.ok) {
     const errorData = await response.json();
-    throw new Error(errorData.error || `Upload fehlgeschlagen: ${response.status}`);
+    const errorMsg = errorData.details 
+      ? `${errorData.error}: ${errorData.details}` 
+      : (errorData.error || `Upload fehlgeschlagen: ${response.status}`);
+    throw new Error(errorMsg);
   }
 };

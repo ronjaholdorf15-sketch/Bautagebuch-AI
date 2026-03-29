@@ -30,28 +30,34 @@ app.post("/api/nextcloud/upload", upload.fields([
       return res.status(400).json({ error: "Fehlende Parameter" });
     }
 
-    const baseUrl = new URL(projectLink).origin;
+    let baseUrl = projectLink.split('/s/')[0];
+    // Falls der Link index.php enthält, entfernen wir es für den WebDAV-Pfad
+    if (baseUrl.endsWith('/index.php')) {
+      baseUrl = baseUrl.substring(0, baseUrl.length - 10);
+    }
     const webDavUrl = `${baseUrl}/public.php/webdav`;
     const encodedFolderName = encodeURIComponent(folderName);
     const targetFolderUrl = `${webDavUrl}/${encodedFolderName}`;
+    const targetFolderUrlWithSlash = `${targetFolderUrl}/`;
     
     const authHeader = `Basic ${Buffer.from(`${projectToken}:`).toString('base64')}`;
     const axiosConfig = {
       headers: { 
         'Authorization': authHeader,
-        'User-Agent': 'Bautagebuch-App-Proxy'
+        'User-Agent': 'Bautagebuch-App-Proxy',
+        'Accept': '*/*'
       },
       maxContentLength: Infinity,
       maxBodyLength: Infinity
     };
 
-    console.log(`Starte Upload nach Nextcloud: ${targetFolderUrl}`);
+    console.log(`Starte Upload nach Nextcloud. Base: ${baseUrl}, Folder: ${folderName}`);
 
     // 1. Ordner erstellen (MKCOL)
     try {
       await axios({
         method: 'MKCOL',
-        url: targetFolderUrl,
+        url: targetFolderUrlWithSlash,
         ...axiosConfig
       });
       console.log(`Ordner erstellt: ${folderName}`);
@@ -59,6 +65,9 @@ app.post("/api/nextcloud/upload", upload.fields([
       // 405 bedeutet oft, dass der Ordner bereits existiert - das ist okay
       if (e.response?.status === 405) {
         console.log(`Ordner existiert bereits: ${folderName}`);
+      } else if (e.response?.status === 403) {
+        console.error("Berechtigungsfehler (403): Prüfen Sie, ob 'Bearbeiten erlauben' in Nextcloud aktiviert ist.");
+        throw new Error("Berechtigungsfehler (403): Bitte 'Bearbeiten erlauben' in der Nextcloud-Freigabe aktivieren.");
       } else {
         console.error("Ordner-Erstellung Fehler:", e.response?.status, e.response?.data || e.message);
         // Wir machen trotzdem weiter, vielleicht klappt der Upload ja

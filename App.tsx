@@ -458,24 +458,36 @@ export default function App() {
       
       // 1. Save to Firestore (Central Database)
       setUploadMessage("Speichere in Datenbank...");
-      const firestoreEntry = {
-        ...entry,
-        technicianUid: auth.currentUser?.uid || 'anonymous',
-        createdAt: serverTimestamp(),
-        // We don't store File objects in Firestore
-        images: [] 
-      };
-      await addDoc(collection(db, 'diaryEntries'), firestoreEntry);
+      try {
+        const firestoreEntry = {
+          ...entry,
+          technicianUid: auth.currentUser?.uid || 'anonymous',
+          createdAt: serverTimestamp(),
+          images: [] 
+        };
+        await addDoc(collection(db, 'diaryEntries'), firestoreEntry);
+      } catch (e: any) {
+        throw new Error(`Fehler beim Speichern in der Datenbank: ${e.message}`);
+      }
 
       // 2. Generate PDF
       setUploadMessage("Generiere PDF...");
-      const logoBase64 = await getLogoAsBase64(config.logo);
-      const pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
-      setLastGeneratedPdf(pdfBlob); 
+      let pdfBlob;
+      try {
+        const logoBase64 = await getLogoAsBase64(config.logo);
+        pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
+        setLastGeneratedPdf(pdfBlob); 
+      } catch (e: any) {
+        throw new Error(`Fehler bei der PDF-Erstellung: ${e.message}`);
+      }
       
       // 3. Upload to Nextcloud
       setUploadMessage(`Sende zu Nextcloud (${project.name})...`);
-      await nextcloudService.uploadDiaryEntry(project, entry, pdfBlob);
+      try {
+        await nextcloudService.uploadDiaryEntry(project, entry, pdfBlob);
+      } catch (e: any) {
+        throw new Error(`Nextcloud-Fehler: ${e.message}`);
+      }
       
       localStorage.removeItem(DRAFT_KEY);
       setStatus({ step: 'success' });
@@ -1204,6 +1216,9 @@ export default function App() {
                             <input placeholder="Ortsname" value={newProjName} onChange={e => setNewProjName(e.target.value)} className="w-full p-2 border rounded text-sm" />
                             <input placeholder="Share-Link" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="w-full p-2 border rounded text-sm" />
                             <Button onClick={() => {
+                                if (!newProjLink.includes('/s/')) {
+                                    return alert("Ungültiger Link. Bitte verwenden Sie einen öffentlichen Freigabe-Link (z.B. https://ihre-nextcloud.de/s/ABC123xyz).");
+                                }
                                 const token = newProjLink.split('/s/')[1]?.split('/')[0];
                                 if (!token || !newProjName) return alert("Ungültige Daten.");
                                 saveConfig({...config, projects: [...config.projects, { name: newProjName, link: newProjLink, token }]});
