@@ -1258,11 +1258,23 @@ export default function App() {
                                         <InfoIcon />
                                     </div>
                                     <div className="flex-1">
-                                        <h4 className="text-lg font-bold text-orange-900 mb-2">Nextcloud CORS Konfiguration</h4>
+                                        <h4 className="text-lg font-bold text-orange-900 mb-2">Nextcloud Setup & Fehlerbehebung</h4>
                                         <p className="text-sm text-orange-800 mb-4 leading-relaxed">
                                             Damit die App Berichte in deine Nextcloud hochladen kann, musst du Cross-Origin Resource Sharing (CORS) erlauben. 
                                             Füge den folgenden Code am Ende der <strong>.htaccess</strong> Datei im Hauptverzeichnis deiner Nextcloud-Installation hinzu:
                                         </p>
+                                        {/* ... (code block) ... */}
+                                        <div className="mt-4 space-y-2">
+                                            <p className="text-[12px] text-orange-700 font-bold">Wichtige Checkliste bei Fehlern:</p>
+                                            <ul className="text-[11px] text-orange-700 list-disc pl-4 space-y-1">
+                                                <li>Verwenden Sie einen <strong>öffentlichen Freigabe-Link</strong> (z.B. <code>https://cloud.de/s/ABC123xyz</code>).</li>
+                                                <li><strong>WICHTIG:</strong> Kopieren Sie <u>nicht</u> die URL aus der Adresszeile Ihres Browsers, während Sie den Ordner ansehen.</li>
+                                                <li>Gehen Sie in Nextcloud auf <strong>Teilen</strong> -> <strong>Öffentlicher Link</strong> -> <strong>Link kopieren</strong>.</li>
+                                                <li>Die Freigabe darf <strong>kein Passwort</strong> haben.</li>
+                                                <li>Die Option <strong>"Bearbeiten erlauben"</strong> muss beim Erstellen des Links in Nextcloud aktiviert sein.</li>
+                                                <li>Prüfen Sie, ob die Nextcloud-URL von außen erreichbar ist.</li>
+                                            </ul>
+                                        </div>
                                         <div className="relative group">
                                             <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-[11px] font-mono overflow-x-auto border-4 border-gray-800 shadow-inner">
         {`# CORS FÜR BAUTAGEBUCH APP
@@ -1289,7 +1301,7 @@ export default function App() {
                                             </button>
                                         </div>
                                         <p className="mt-4 text-[12px] text-orange-700 italic">
-                                            Hinweis: Die Änderung greift sofort. Falls du Fehlermeldungen beim Upload erhältst, prüfe ob das <strong>"Bearbeiten erlauben"</strong> Häkchen beim Nextcloud-Share gesetzt ist.
+                                            Hinweis: Die Änderung greift sofort. Falls du Fehlermeldungen beim Upload erhältst, prüfe ob das <strong>"Bearbeiten erlauben"</strong> Häkchen beim Nextcloud-Share gesetzt ist und ob die Freigabe <strong>kein Passwort</strong> hat (Passwort-Schutz wird aktuell nicht unterstützt).
                                         </p>
                                     </div>
                                 </div>

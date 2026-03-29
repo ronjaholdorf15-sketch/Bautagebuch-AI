@@ -28,19 +28,26 @@ app.post("/api/nextcloud/upload", upload.fields([
       return res.status(400).json({ error: "Fehlende Parameter" });
     }
 
+    if (!projectLink.includes('/s/')) {
+      return res.status(400).json({ 
+        error: "Ungültiger Link-Typ", 
+        details: "Der Link muss ein öffentlicher Freigabe-Link sein (enthält '/s/'). Links aus der Browser-Adresszeile funktionieren nicht." 
+      });
+    }
+
     let baseUrl = projectLink.split('/s/')[0];
-    if (baseUrl.endsWith('/index.php')) {
-      baseUrl = baseUrl.substring(0, baseUrl.length - 10);
-    }
+    
+    // Remove index.php if present at the end
+    baseUrl = baseUrl.replace(/\/index\.php$/, '');
+    
     // Remove trailing slash from baseUrl if present
-    if (baseUrl.endsWith('/')) {
-      baseUrl = baseUrl.substring(0, baseUrl.length - 1);
-    }
+    baseUrl = baseUrl.replace(/\/$/, '');
     
     const webDavUrl = `${baseUrl}/public.php/webdav`;
     
     const authHeader = `Basic ${Buffer.from(`${projectToken}:`).toString('base64')}`;
     console.log(`Nextcloud Request: Base=${baseUrl}, Token=${projectToken.substring(0, 3)}...`);
+    console.log(`WebDAV URL: ${webDavUrl}`);
     
     const commonHeaders = { 
       'Authorization': authHeader,
@@ -61,9 +68,27 @@ app.post("/api/nextcloud/upload", upload.fields([
         console.log(`Test-Verbindung Status: ${response.status} ${response.statusText}`);
         
         if (!response.ok) {
+          const contentType = response.headers.get('content-type') || '';
           const body = await response.text();
-          console.error(`Test-Verbindung fehlgeschlagen Body: ${body.substring(0, 200)}`);
-          throw new Error(`Nextcloud returned ${response.status}: ${response.statusText}`);
+          console.error(`Test-Verbindung fehlgeschlagen. Status: ${response.status}, Content-Type: ${contentType}`);
+          console.error(`Body (Auszug): ${body.substring(0, 500)}`);
+          
+          let errorDetail = `Nextcloud antwortete mit ${response.status}: ${response.statusText}`;
+          
+          if (contentType.includes('text/html')) {
+            errorDetail = "Anmeldung verweigert oder Umleitung auf Login-Seite. Das passiert oft, wenn der Link kein 'Öffentlicher Link' ist oder ein Passwort benötigt wird. Bitte stellen Sie sicher, dass Sie den Link über 'Teilen' -> 'Öffentlicher Link' erstellt haben.";
+          } else if (response.status === 401) {
+            errorDetail = "Anmeldung verweigert (401). Der Token ist ungültig oder die Freigabe ist mit einem Passwort geschützt.";
+          } else if (response.status === 403) {
+            errorDetail = "Zugriff verweigert (403). Bitte prüfen Sie, ob 'Bearbeiten erlauben' in Nextcloud aktiviert ist.";
+          } else if (response.status === 404) {
+            errorDetail = "Nicht gefunden (404). Die WebDAV-URL ist ungültig. Haben Sie den Link korrekt kopiert?";
+          }
+          
+          return res.status(response.status).json({ 
+            error: "Verbindung fehlgeschlagen", 
+            details: errorDetail 
+          });
         }
         
         return res.json({ success: true, message: "Verbindung erfolgreich" });
