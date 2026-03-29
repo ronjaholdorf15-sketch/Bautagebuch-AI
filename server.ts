@@ -3,7 +3,6 @@ import express from "express";
 import cors from "cors";
 import multer from "multer";
 import axios from "axios";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 
 const app = express();
@@ -33,11 +32,17 @@ app.post("/api/nextcloud/upload", upload.fields([
 
     const baseUrl = new URL(projectLink).origin;
     const webDavUrl = `${baseUrl}/public.php/webdav`;
-    const targetFolderUrl = `${webDavUrl}/${folderName}`;
+    const encodedFolderName = encodeURIComponent(folderName);
+    const targetFolderUrl = `${webDavUrl}/${encodedFolderName}`;
     
     const authHeader = `Basic ${Buffer.from(`${projectToken}:`).toString('base64')}`;
     const axiosConfig = {
-      headers: { 'Authorization': authHeader }
+      headers: { 
+        'Authorization': authHeader,
+        'User-Agent': 'Bautagebuch-App-Proxy'
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
     };
 
     console.log(`Starte Upload nach Nextcloud: ${targetFolderUrl}`);
@@ -49,42 +54,61 @@ app.post("/api/nextcloud/upload", upload.fields([
         url: targetFolderUrl,
         ...axiosConfig
       });
+      console.log(`Ordner erstellt: ${folderName}`);
     } catch (e: any) {
       // 405 bedeutet oft, dass der Ordner bereits existiert - das ist okay
-      if (e.response?.status !== 405) {
-        console.warn("Ordner-Erstellung Warnung:", e.message);
+      if (e.response?.status === 405) {
+        console.log(`Ordner existiert bereits: ${folderName}`);
+      } else {
+        console.error("Ordner-Erstellung Fehler:", e.response?.status, e.response?.data || e.message);
+        // Wir machen trotzdem weiter, vielleicht klappt der Upload ja
       }
     }
 
     // 2. PDF hochladen
     if (pdfFile) {
+      const encodedPdfFilename = encodeURIComponent(pdfFilename);
+      console.log(`Lade PDF hoch: ${pdfFilename}`);
       await axios({
         method: 'PUT',
-        url: `${targetFolderUrl}/${pdfFilename}`,
+        url: `${targetFolderUrl}/${encodedPdfFilename}`,
         data: pdfFile.buffer,
         headers: {
           ...axiosConfig.headers,
           'Content-Type': 'application/pdf'
-        }
+        },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
       });
     }
 
     // 3. Bilder hochladen
     for (const img of imageFiles) {
+      const encodedImgName = encodeURIComponent(img.originalname);
+      console.log(`Lade Bild hoch: ${img.originalname}`);
       await axios({
         method: 'PUT',
-        url: `${targetFolderUrl}/${img.originalname}`,
+        url: `${targetFolderUrl}/${encodedImgName}`,
         data: img.buffer,
         headers: {
           ...axiosConfig.headers,
           'Content-Type': img.mimetype
-        }
+        },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
       });
     }
 
+    console.log("Upload erfolgreich abgeschlossen.");
     res.json({ success: true });
   } catch (error: any) {
-    console.error("Nextcloud Proxy Fehler:", error.response?.data || error.message);
+    console.error("Nextcloud Proxy Fehler:");
+    if (error.response) {
+      console.error("Status:", error.response.status);
+      console.error("Data:", error.response.data);
+    } else {
+      console.error("Message:", error.message);
+    }
     res.status(500).json({ 
       error: "Upload fehlgeschlagen", 
       details: error.response?.statusText || error.message 
@@ -95,6 +119,7 @@ app.post("/api/nextcloud/upload", upload.fields([
 // Vite Middleware für die Frontend-Dateien
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -103,7 +128,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*all', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
