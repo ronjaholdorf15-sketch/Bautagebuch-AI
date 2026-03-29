@@ -32,10 +32,17 @@ export const uploadDiaryEntry = async (
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    const errorMsg = errorData.details 
-      ? `${errorData.error}: ${errorData.details}` 
-      : (errorData.error || `Upload fehlgeschlagen: ${response.status}`);
+    let errorMsg = `Upload fehlgeschlagen: ${response.status}`;
+    try {
+      const errorData = await response.json();
+      errorMsg = errorData.details 
+        ? `${errorData.error}: ${errorData.details}` 
+        : (errorData.error || errorMsg);
+    } catch (e) {
+      // Fallback if response is not JSON
+      const text = await response.text();
+      if (text && text.length < 200) errorMsg = text;
+    }
     throw new Error(errorMsg);
   }
 };
@@ -52,8 +59,15 @@ export const testConnection = async (project: PublicProject) => {
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.details || errorData.error || "Verbindung fehlgeschlagen");
+    let errorMsg = "Verbindung fehlgeschlagen";
+    try {
+      const errorData = await response.json();
+      errorMsg = errorData.details || errorData.error || errorMsg;
+    } catch (e) {
+      const text = await response.text();
+      if (text && text.length < 200) errorMsg = text;
+    }
+    throw new Error(errorMsg);
   }
   return true;
 };

@@ -90,10 +90,11 @@ app.post("/api/nextcloud/upload", upload.fields([
       if (mkcolRes.status === 405) {
         console.log(`Ordner existiert bereits: ${folderName}`);
       } else if (mkcolRes.status === 403) {
-        console.error("Berechtigungsfehler (403): Prüfen Sie, ob 'Bearbeiten erlauben' in Nextcloud aktiviert ist.");
-        throw new Error("Berechtigungsfehler (403): Bitte 'Bearbeiten erlauben' in der Nextcloud-Freigabe aktivieren.");
+        const errorMsg = "Berechtigungsfehler (403): Bitte prüfen Sie, ob in Nextcloud die Option 'Bearbeiten erlauben' für diesen Link aktiviert ist.";
+        console.error(errorMsg);
+        return res.status(403).json({ error: "Berechtigungsfehler", details: errorMsg });
       } else if (!mkcolRes.ok) {
-        console.error(`Ordner-Erstellung Fehler: ${mkcolRes.status} ${mkcolRes.statusText}`);
+        console.warn(`Ordner-Erstellung Warnung: ${mkcolRes.status} ${mkcolRes.statusText}`);
       } else {
         console.log(`Ordner erstellt: ${folderName}`);
       }
@@ -115,6 +116,12 @@ app.post("/api/nextcloud/upload", upload.fields([
       });
       
       if (!pdfRes.ok) {
+        if (pdfRes.status === 403) {
+          return res.status(403).json({ 
+            error: "Berechtigungsfehler", 
+            details: "PDF-Upload fehlgeschlagen (403). Bitte 'Bearbeiten erlauben' in Nextcloud aktivieren." 
+          });
+        }
         throw new Error(`PDF Upload fehlgeschlagen: ${pdfRes.status} ${pdfRes.statusText}`);
       }
     }

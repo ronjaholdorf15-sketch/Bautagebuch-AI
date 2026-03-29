@@ -605,7 +605,21 @@ export default function App() {
       setStatus({ step: 'success' });
     } catch (error: any) {
       console.error("Upload Error:", error);
-      setUploadError(error.message || "Netzwerkfehler");
+      let displayError = error.message || "Netzwerkfehler";
+      
+      // If it's a JSON error from Firestore, try to parse it
+      if (displayError.startsWith('{') && displayError.endsWith('}')) {
+        try {
+          const parsed = JSON.parse(displayError);
+          if (parsed.error && parsed.error.includes('insufficient permissions')) {
+            displayError = "Berechtigungsfehler in der Datenbank. Bitte prüfen Sie, ob Sie als Administrator angemeldet sind oder ob der Einsatzort korrekt ausgefüllt ist.";
+          } else {
+            displayError = parsed.error || displayError;
+          }
+        } catch (e) { /* ignore */ }
+      }
+      
+      setUploadError(displayError);
     }
   };
 
@@ -1353,7 +1367,11 @@ export default function App() {
                                 if (!newProjLink.includes('/s/')) {
                                     return alert("Ungültiger Link. Bitte verwenden Sie einen öffentlichen Freigabe-Link (z.B. https://ihre-nextcloud.de/s/ABC123xyz).");
                                 }
-                                const token = newProjLink.split('/s/')[1]?.split('/')[0];
+                                // Extract token more robustly, removing query params or trailing slashes
+                                const tokenPart = newProjLink.split('/s/')[1];
+                                if (!tokenPart) return alert("Ungültiger Link.");
+                                const token = tokenPart.split(/[/?#]/)[0];
+                                
                                 if (!token || !newProjName) return alert("Ungültige Daten.");
                                 saveConfig({...config, projects: [...config.projects, { name: newProjName, link: newProjLink, token }]});
                                 setNewProjName(''); setNewProjLink('');
