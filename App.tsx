@@ -9,8 +9,7 @@ import { Logo, getLogoAsBase64 } from './components/Logo';
 import { auth, db } from './firebase';
 import { 
   onAuthStateChanged, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
+  signInAnonymously, 
   signOut,
   User as FirebaseUser
 } from 'firebase/auth';
@@ -368,42 +367,44 @@ export default function App() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // 1. Find technician by code in local config
+    const tech = config.technicians.find(t => t.code.toUpperCase() === loginCode.toUpperCase());
+    
+    if (!tech) {
+        alert("Benutzer nicht gefunden. Bitte Kürzel prüfen.");
+        return;
+    }
+
+    if (tech.password && tech.password !== loginPassword) {
+        alert("Falsches Passwort.");
+        return;
+    }
+
     try {
-        const provider = new GoogleAuthProvider();
-        const result = await signInWithPopup(auth, provider);
+        // 2. Sign in anonymously to Firebase to get a valid session for Firestore
+        const result = await signInAnonymously(auth);
         const user = result.user;
         
-        // Find technician by code
-        const tech = config.technicians.find(t => t.code.toUpperCase() === loginCode.toUpperCase());
-        if (tech) {
-            if (tech.password && tech.password !== loginPassword) { 
-                alert("Falsches Passwort."); 
-                await signOut(auth);
-                return; 
-            }
-            
-            // 1. Create/Update User Document in Firestore
-            try {
-                await setDoc(doc(db, 'users', user.uid), {
-                    uid: user.uid,
-                    email: user.email,
-                    role: tech.role,
-                    name: tech.name
-                }, { merge: true });
-            } catch (e: any) {
-                console.error("Failed to sync user to Firestore", e);
-            }
-
-            setCurrentUser(tech);
-            setEntry(prev => ({ ...prev, technician: tech.name, technicianUid: user.uid }));
-            setStatus({ step: 'form' });
-        } else {
-            alert("Benutzer nicht in der Technikerliste gefunden. Bitte Admin kontaktieren.");
-            await signOut(auth);
+        // 3. Create/Update User Document in Firestore using the anonymous UID
+        // This links the technical session to the technician's role
+        try {
+            await setDoc(doc(db, 'users', user.uid), {
+                uid: user.uid,
+                email: `${tech.code.toLowerCase()}@internal.app`, // Placeholder email for schema compatibility
+                role: tech.role,
+                name: tech.name
+            }, { merge: true });
+        } catch (e: any) {
+            console.error("Failed to sync user to Firestore", e);
         }
+
+        setCurrentUser(tech);
+        setEntry(prev => ({ ...prev, technician: tech.name, technicianUid: user.uid }));
+        setStatus({ step: 'form' });
+        
     } catch (error) {
         console.error("Login failed", error);
-        alert("Login fehlgeschlagen. Bitte Google-Konto verwenden.");
+        alert("Anmeldung am Datenbank-Server fehlgeschlagen.");
     }
   };
 
