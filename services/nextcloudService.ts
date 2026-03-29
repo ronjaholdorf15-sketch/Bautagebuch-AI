@@ -39,3 +39,21 @@ export const uploadDiaryEntry = async (
     throw new Error(errorMsg);
   }
 };
+
+export const testConnection = async (project: PublicProject) => {
+  const formData = new FormData();
+  formData.append('projectLink', project.link);
+  formData.append('projectToken', project.token);
+  formData.append('test', 'true');
+
+  const response = await fetch('/api/nextcloud/upload', {
+    method: 'POST',
+    body: formData
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.details || errorData.error || "Verbindung fehlgeschlagen");
+  }
+  return true;
+};

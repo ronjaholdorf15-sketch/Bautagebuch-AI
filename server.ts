@@ -20,25 +20,18 @@ app.post("/api/nextcloud/upload", upload.fields([
   { name: 'images' }
 ]), async (req, res) => {
   try {
-    const { projectLink, projectToken, folderName, pdfFilename } = req.body;
+    const { projectLink, projectToken, folderName, pdfFilename, test } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     
-    const pdfFile = files['pdf']?.[0];
-    const imageFiles = files['images'] || [];
-
-    if (!projectLink || !projectToken || !folderName) {
+    if (!projectLink || !projectToken) {
       return res.status(400).json({ error: "Fehlende Parameter" });
     }
 
     let baseUrl = projectLink.split('/s/')[0];
-    // Falls der Link index.php enthält, entfernen wir es für den WebDAV-Pfad
     if (baseUrl.endsWith('/index.php')) {
       baseUrl = baseUrl.substring(0, baseUrl.length - 10);
     }
     const webDavUrl = `${baseUrl}/public.php/webdav`;
-    const encodedFolderName = encodeURIComponent(folderName);
-    const targetFolderUrl = `${webDavUrl}/${encodedFolderName}`;
-    const targetFolderUrlWithSlash = `${targetFolderUrl}/`;
     
     const authHeader = `Basic ${Buffer.from(`${projectToken}:`).toString('base64')}`;
     const axiosConfig = {
@@ -51,6 +44,37 @@ app.post("/api/nextcloud/upload", upload.fields([
       maxBodyLength: Infinity
     };
 
+    // Test-Verbindung: Prüfen ob der Token gültig ist
+    if (test === 'true') {
+      console.log(`Test-Verbindung für: ${baseUrl}`);
+      try {
+        await axios({
+          ...axiosConfig,
+          method: 'PROPFIND',
+          url: webDavUrl,
+          headers: { ...axiosConfig.headers, 'Depth': '0' }
+        });
+        return res.json({ success: true, message: "Verbindung erfolgreich" });
+      } catch (e: any) {
+        console.error("Test-Verbindung Fehler:", e.response?.status, e.response?.data || e.message);
+        return res.status(e.response?.status || 500).json({ 
+          error: "Verbindung fehlgeschlagen", 
+          details: e.response?.status === 401 ? "Ungültiger Token oder Link" : (e.response?.statusText || e.message)
+        });
+      }
+    }
+
+    if (!folderName) {
+      return res.status(400).json({ error: "Fehlender Ordnername" });
+    }
+
+    const pdfFile = files['pdf']?.[0];
+    const imageFiles = files['images'] || [];
+
+    const encodedFolderName = encodeURIComponent(folderName);
+    const targetFolderUrl = `${webDavUrl}/${encodedFolderName}`;
+    const targetFolderUrlWithSlash = `${targetFolderUrl}/`;
+    
     console.log(`Starte Upload nach Nextcloud. Base: ${baseUrl}, Folder: ${folderName}`);
 
     // 1. Ordner erstellen (MKCOL)

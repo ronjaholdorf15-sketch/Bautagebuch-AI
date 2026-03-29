@@ -608,7 +608,11 @@ export default function App() {
                     <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                 </div>
                 <h2 className="text-xl font-bold text-gray-900 mb-2">Upload fehlgeschlagen</h2>
-                <p className="text-sm text-gray-500 mb-6">Der Bericht konnte nicht hochgeladen werden (z.B. keine Berechtigung oder kein Internet).</p>
+                <div className="bg-red-50 p-4 rounded-xl mb-6 text-left border border-red-100">
+                    <p className="text-xs font-black text-red-400 uppercase tracking-widest mb-1">Fehlermeldung:</p>
+                    <p className="text-sm text-red-700 font-bold leading-relaxed">{uploadError}</p>
+                </div>
+                <p className="text-xs text-gray-500 mb-6 italic">Tipp: Prüfen Sie, ob der Nextcloud-Link korrekt ist und "Bearbeiten erlauben" aktiviert wurde.</p>
                 <div className="space-y-3">
                     <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_Backup_${entry.date}.pdf`)} className="w-full py-3 flex items-center justify-center bg-brand-primary">
                         <DownloadIcon /> PDF manuell sichern
@@ -1206,9 +1210,27 @@ export default function App() {
                         <div className="space-y-2 mb-4 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
                             {config.projects.length === 0 && <p className="text-xs text-gray-400 text-center py-4">Keine Projekte angelegt.</p>}
                             {config.projects.map(p => (
-                                <div key={p.token} className="flex justify-between items-center p-2 bg-white rounded border text-sm shadow-sm">
-                                    <span className="font-medium truncate">{p.name}</span>
-                                    <button onClick={() => { if(confirm("Projekt löschen?")) saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)}) }} className="text-red-400"><TrashIcon /></button>
+                                <div key={p.token} className="flex flex-col p-2 bg-white rounded border text-sm shadow-sm gap-2">
+                                    <div className="flex justify-between items-center">
+                                        <span className="font-medium truncate">{p.name}</span>
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={async () => {
+                                                    try {
+                                                        await nextcloudService.testConnection(p);
+                                                        alert("Verbindung erfolgreich!");
+                                                    } catch (e: any) {
+                                                        alert(`Verbindung fehlgeschlagen: ${e.message}`);
+                                                    }
+                                                }} 
+                                                className="text-brand-primary text-xs font-bold px-2 py-1 bg-brand-primary/5 rounded border border-brand-primary/10"
+                                            >
+                                                Test
+                                            </button>
+                                            <button onClick={() => { if(confirm("Projekt löschen?")) saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)}) }} className="text-red-400 p-1"><TrashIcon /></button>
+                                        </div>
+                                    </div>
+                                    <div className="text-[10px] text-gray-400 truncate">{p.link}</div>
                                 </div>
                             ))}
                         </div>
