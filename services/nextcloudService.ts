@@ -33,15 +33,15 @@ export const uploadDiaryEntry = async (
 
   if (!response.ok) {
     let errorMsg = `Upload fehlgeschlagen: ${response.status}`;
+    const responseText = await response.text();
     try {
-      const errorData = await response.json();
+      const errorData = JSON.parse(responseText);
       errorMsg = errorData.details 
         ? `${errorData.error}: ${errorData.details}` 
         : (errorData.error || errorMsg);
     } catch (e) {
       // Fallback if response is not JSON
-      const text = await response.text();
-      if (text && text.length < 200) errorMsg = text;
+      if (responseText && responseText.length < 200) errorMsg = responseText;
     }
     throw new Error(errorMsg);
   }
@@ -60,12 +60,12 @@ export const testConnection = async (project: PublicProject) => {
 
   if (!response.ok) {
     let errorMsg = "Verbindung fehlgeschlagen";
+    const responseText = await response.text();
     try {
-      const errorData = await response.json();
+      const errorData = JSON.parse(responseText);
       errorMsg = errorData.details || errorData.error || errorMsg;
     } catch (e) {
-      const text = await response.text();
-      if (text && text.length < 200) errorMsg = text;
+      if (responseText && responseText.length < 200) errorMsg = responseText;
     }
     throw new Error(errorMsg);
   }
