@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { AppConfig, Technician, PublicProject, FormStatus, DiaryEntry, WeatherCondition, MaterialItem } from './types';
-import * as nextcloudService from './services/nextcloudService';
 import * as geminiService from './services/geminiService';
 import { generateDiaryPdf } from './services/pdfService';
 import { Button } from './components/Button';
@@ -254,11 +253,15 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
 
   // Material Analysis States
-  const [analysisStartDate, setAnalysisStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [analysisStartDate, setAnalysisStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(1); // First day of current month
+    return d.toISOString().split('T')[0];
+  });
   const [analysisEndDate, setAnalysisEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResults, setAnalysisResults] = useState<{ name: string; amount: number }[]>([]);
-  const [activeAdminTab, setActiveAdminTab] = useState<'general' | 'material'>('general');
+  const [activeAdminTab, setActiveAdminTab] = useState<'general'>('general');
 
   // Load configuration on mount
   useEffect(() => {
@@ -589,20 +592,26 @@ export default function App() {
         const logoBase64 = await getLogoAsBase64(config.logo);
         pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
         setLastGeneratedPdf(pdfBlob); 
+        
+        // Automatically trigger download of the generated PDF
+        const url = URL.createObjectURL(pdfBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `Bautagebuch_${entry.location.replace(/\s+/g, '_')}_${entry.date}.pdf`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
       } catch (e: any) {
         throw new Error(`Fehler bei der PDF-Erstellung: ${e.message}`);
       }
       
-      // 3. Upload to Nextcloud
-      setUploadMessage(`Sende zu Nextcloud (${project.name})...`);
-      try {
-        await nextcloudService.uploadDiaryEntry(project, entry, pdfBlob);
-      } catch (e: any) {
-        throw new Error(`Nextcloud-Fehler: ${e.message}`);
-      }
-      
       localStorage.removeItem(DRAFT_KEY);
       setStatus({ step: 'success' });
+      
+      // Refresh material analysis if admin
+      if (currentUser?.role === 'admin') {
+        handleAnalyzeMaterials();
+      }
     } catch (error: any) {
       console.error("Upload Error:", error);
       let displayError = error.message || "Netzwerkfehler";
@@ -690,6 +699,27 @@ export default function App() {
     }
   };
 
+  const exportMaterialCsv = () => {
+    if (analysisResults.length === 0) return;
+    
+    const headers = ['Materialbezeichnung', 'Gesamtmenge', 'Einheit'];
+    const rows = analysisResults.map(r => [r.name, r.amount, 'ST']);
+    
+    const csvContent = [
+      headers.join(';'),
+      ...rows.map(row => row.join(';'))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Materialbedarf_${analysisStartDate}_bis_${analysisEndDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const exportMaterialPdf = () => {
     if (analysisResults.length === 0) return;
     const doc = new jsPDF();
@@ -733,12 +763,12 @@ export default function App() {
                 <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-red-100 mb-6 text-red-600">
                     <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                 </div>
-                <h2 className="text-xl font-bold text-gray-900 mb-2">Upload fehlgeschlagen</h2>
+                <h2 className="text-xl font-bold text-gray-900 mb-2">Speichern fehlgeschlagen</h2>
                 <div className="bg-red-50 p-4 rounded-xl mb-6 text-left border border-red-100">
                     <p className="text-xs font-black text-red-400 uppercase tracking-widest mb-1">Fehlermeldung:</p>
                     <p className="text-sm text-red-700 font-bold leading-relaxed">{uploadError}</p>
                 </div>
-                <p className="text-xs text-gray-500 mb-6 italic">Tipp: Prüfen Sie, ob der Nextcloud-Link korrekt ist und "Bearbeiten erlauben" aktiviert wurde.</p>
+                <p className="text-xs text-gray-500 mb-6 italic">Tipp: Prüfen Sie Ihre Internetverbindung und ob Sie angemeldet sind.</p>
                 <div className="space-y-3">
                     <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_Backup_${entry.date}.pdf`)} className="w-full py-3 flex items-center justify-center bg-brand-primary">
                         <DownloadIcon /> PDF manuell sichern
@@ -764,10 +794,10 @@ export default function App() {
             <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
           </div>
           <h2 className="text-2xl font-bold text-brand-900 mb-2">Erfolgreich!</h2>
-          <p className="text-gray-600 mb-8">Der Bericht wurde übertragen.</p>
+          <p className="text-gray-600 mb-8">Der Bericht wurde gespeichert und das PDF erstellt. Die Materialliste wurde in die Auswertung übernommen.</p>
           <div className="space-y-3">
              <Button onClick={() => lastGeneratedPdf && downloadBlob(lastGeneratedPdf, `Bautagebuch_${entry.date}.pdf`)} variant="outline" className="w-full">
-                 <DownloadIcon /> Als PDF lokal kopieren
+                 <DownloadIcon /> PDF erneut herunterladen
              </Button>
              <Button onClick={handleReuseData} variant="secondary" className="w-full">Daten für neuen Bericht übernehmen</Button>
              <Button onClick={resetForm} className="w-full">Komplett neuer Bericht</Button>
@@ -853,6 +883,81 @@ export default function App() {
           </div>
       ) : (
         <div className="max-w-3xl mx-auto p-4 md:p-10 animate-fade-in">
+            {currentUser.role === 'admin' && (
+                <div className="mb-10 space-y-6">
+                    <div className="bg-white p-8 rounded-[2.5rem] shadow-soft border border-slate-100">
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h3 className="text-2xl font-black text-slate-900 tracking-tighter">Material-Auswertung</h3>
+                                <p className="text-slate-400 text-sm font-medium mt-1">Zusammenfassung aller Materialien im Zeitraum</p>
+                            </div>
+                            <div className="flex gap-2">
+                                {analysisResults.length > 0 && (
+                                    <>
+                                        <Button onClick={exportMaterialCsv} variant="outline" className="text-[10px] px-4 py-2">
+                                            <DownloadIcon /> CSV
+                                        </Button>
+                                        <Button onClick={exportMaterialPdf} variant="outline" className="text-[10px] px-4 py-2">
+                                            <DownloadIcon /> PDF
+                                        </Button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                        
+                        <div className="flex flex-col md:flex-row gap-4 items-end mb-8">
+                            <div className="flex-1 space-y-2 w-full">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Von</label>
+                                <input 
+                                    type="date" 
+                                    value={analysisStartDate} 
+                                    onChange={e => setAnalysisStartDate(e.target.value)}
+                                    className="w-full p-4 border rounded-2xl font-bold text-slate-700 outline-none focus:ring-4 focus:ring-brand-primary/10 bg-slate-50/50" 
+                                />
+                            </div>
+                            <div className="flex-1 space-y-2 w-full">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Bis</label>
+                                <input 
+                                    type="date" 
+                                    value={analysisEndDate} 
+                                    onChange={e => setAnalysisEndDate(e.target.value)}
+                                    className="w-full p-4 border rounded-2xl font-bold text-slate-700 outline-none focus:ring-4 focus:ring-brand-primary/10 bg-slate-50/50" 
+                                />
+                            </div>
+                            <Button onClick={handleAnalyzeMaterials} disabled={isAnalyzing} className="w-full md:w-auto px-8 py-4">
+                                {isAnalyzing ? 'Analysiere...' : 'Auswerten'}
+                            </Button>
+                        </div>
+
+                        {analysisResults.length > 0 ? (
+                            <div className="bg-slate-50 border rounded-3xl overflow-hidden">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="bg-slate-100/50 border-b">
+                                            <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Material</th>
+                                            <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Menge</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {analysisResults.map((r, i) => (
+                                            <tr key={i} className="border-b last:border-0 hover:bg-white transition-colors">
+                                                <td className="p-4 font-bold text-slate-700 text-sm">{r.name}</td>
+                                                <td className="p-4 text-right font-black text-brand-primary">
+                                                    <span className="bg-brand-primary/5 px-3 py-1 rounded-lg border border-brand-primary/10 text-xs">{r.amount} ST</span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : !isAnalyzing && (
+                            <div className="text-center py-10 bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-100">
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Klicken Sie auf "Auswerten", um die Analyse für den gewählten Zeitraum zu starten</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
             <form onSubmit={handleSubmit} className="space-y-8">
                 {/* Header Card */}
                 <div className="bg-white p-6 md:p-10 rounded-[2.5rem] shadow-soft border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-6">
@@ -1157,157 +1262,13 @@ export default function App() {
                 <div className="flex justify-between items-center mb-6 border-b pb-4">
                     <div className="flex items-center gap-6">
                         <h3 className="text-2xl font-bold text-brand-900">Administration</h3>
-                        <nav className="flex gap-1 bg-slate-100 p-1 rounded-xl">
-                            <button 
-                                onClick={() => setActiveAdminTab('general')}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeAdminTab === 'general' ? 'bg-white text-brand-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                Konfiguration
-                            </button>
-                            <button 
-                                onClick={() => setActiveAdminTab('material')}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeAdminTab === 'material' ? 'bg-white text-brand-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                Material-Auswertung
-                            </button>
-                        </nav>
                     </div>
                     <div className="flex items-center gap-2">
-                        <button 
-                            onClick={() => setShowHelp(!showHelp)} 
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${showHelp ? 'bg-orange-100 text-orange-700 border border-orange-200' : 'bg-brand-50 text-brand-700 border border-brand-100'}`}
-                        >
-                            <InfoIcon /> {showHelp ? 'Hilfe schließen' : 'Nextcloud Setup Hilfe'}
-                        </button>
                         <button onClick={() => { setShowSettings(false); setEditingTechId(null); setShowHelp(false); }} className="p-2 text-gray-500 hover:text-gray-800"><CloseIcon /></button>
                     </div>
                 </div>
                 
-                {activeAdminTab === 'material' ? (
-                    <div className="animate-fade-in space-y-8">
-                        <div className="bg-slate-50 p-8 rounded-3xl border border-slate-200">
-                            <h4 className="text-lg font-bold text-slate-900 mb-6">Zeitraum auswählen</h4>
-                            <div className="flex flex-col md:flex-row gap-6 items-end">
-                                <div className="flex-1 space-y-2">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Von</label>
-                                    <input 
-                                        type="date" 
-                                        value={analysisStartDate} 
-                                        onChange={e => setAnalysisStartDate(e.target.value)}
-                                        className="w-full p-4 border rounded-2xl font-bold text-slate-700 outline-none focus:ring-4 focus:ring-brand-primary/10" 
-                                    />
-                                </div>
-                                <div className="flex-1 space-y-2">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Bis</label>
-                                    <input 
-                                        type="date" 
-                                        value={analysisEndDate} 
-                                        onChange={e => setAnalysisEndDate(e.target.value)}
-                                        className="w-full p-4 border rounded-2xl font-bold text-slate-700 outline-none focus:ring-4 focus:ring-brand-primary/10" 
-                                    />
-                                </div>
-                                <Button onClick={handleAnalyzeMaterials} disabled={isAnalyzing} className="px-10 py-4">
-                                    {isAnalyzing ? 'Analysiere...' : 'Auswerten'}
-                                </Button>
-                            </div>
-                        </div>
-
-                        {analysisResults.length > 0 && (
-                            <div className="space-y-6">
-                                <div className="flex justify-between items-center">
-                                    <h4 className="text-lg font-bold text-slate-900">Ergebnisse</h4>
-                                    <Button onClick={exportMaterialPdf} variant="outline" className="text-xs">
-                                        <DownloadIcon /> Als PDF exportieren
-                                    </Button>
-                                </div>
-                                <div className="bg-white border rounded-3xl overflow-hidden shadow-sm">
-                                    <table className="w-full text-left border-collapse">
-                                        <thead>
-                                            <tr className="bg-slate-50 border-b">
-                                                <th className="p-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Material</th>
-                                                <th className="p-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Menge</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {analysisResults.map((r, i) => (
-                                                <tr key={i} className="border-b last:border-0 hover:bg-slate-50/50 transition-colors">
-                                                    <td className="p-5 font-bold text-slate-700">{r.name}</td>
-                                                    <td className="p-5 text-right font-black text-brand-primary">
-                                                        <span className="bg-brand-primary/5 px-3 py-1 rounded-lg border border-brand-primary/10">{r.amount} ST</span>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        )}
-                        
-                        {analysisResults.length === 0 && !isAnalyzing && (
-                            <div className="text-center py-20 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-                                <p className="text-slate-400 font-bold uppercase tracking-widest">Keine Daten für diesen Zeitraum gefunden</p>
-                            </div>
-                        )}
-                    </div>
-                ) : (
-                    <>
-                        {showHelp && (
-                            <div className="mb-8 p-6 bg-orange-50 rounded-2xl border border-orange-100 animate-in fade-in slide-in-from-top-4 duration-300">
-                                <div className="flex items-start gap-4">
-                                    <div className="p-3 bg-white rounded-xl shadow-sm">
-                                        <InfoIcon />
-                                    </div>
-                                    <div className="flex-1">
-                                        <h4 className="text-lg font-bold text-orange-900 mb-2">Nextcloud Setup & Fehlerbehebung</h4>
-                                        <p className="text-sm text-orange-800 mb-4 leading-relaxed">
-                                            Damit die App Berichte in deine Nextcloud hochladen kann, musst du Cross-Origin Resource Sharing (CORS) erlauben. 
-                                            Füge den folgenden Code am Ende der <strong>.htaccess</strong> Datei im Hauptverzeichnis deiner Nextcloud-Installation hinzu:
-                                        </p>
-                                        {/* ... (code block) ... */}
-                                        <div className="mt-4 space-y-2">
-                                            <p className="text-[12px] text-orange-700 font-bold">Wichtige Checkliste bei Fehlern:</p>
-                                            <ul className="text-[11px] text-orange-700 list-disc pl-4 space-y-1">
-                                                <li>Verwenden Sie einen <strong>öffentlichen Freigabe-Link</strong> (z.B. <code>https://cloud.de/s/ABC123xyz</code>).</li>
-                                                <li><strong>WICHTIG:</strong> Kopieren Sie <u>nicht</u> die URL aus der Adresszeile Ihres Browsers, während Sie den Ordner ansehen.</li>
-                                                <li>Gehen Sie in Nextcloud auf <strong>Teilen</strong> -> <strong>Öffentlicher Link</strong> -> <strong>Link kopieren</strong>.</li>
-                                                <li>Die Freigabe darf <strong>kein Passwort</strong> haben.</li>
-                                                <li>Die Option <strong>"Bearbeiten erlauben"</strong> muss beim Erstellen des Links in Nextcloud aktiviert sein.</li>
-                                                <li>Prüfen Sie, ob die Nextcloud-URL von außen erreichbar ist.</li>
-                                            </ul>
-                                        </div>
-                                        <div className="relative group">
-                                            <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-[11px] font-mono overflow-x-auto border-4 border-gray-800 shadow-inner">
-        {`# CORS FÜR BAUTAGEBUCH APP
-        <IfModule mod_headers.c>
-            Header always set Access-Control-Allow-Origin "*"
-            Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, MKCOL, PROPFIND"
-            Header always set Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With, Range"
-            Header always set Access-Control-Expose-Headers "Content-Location, Location"
-        
-            RewriteEngine On
-            RewriteCond %{REQUEST_METHOD} OPTIONS
-            RewriteRule ^(.*)$ $1 [R=200,L]
-        </IfModule>`}
-                                            </pre>
-                                            <button 
-                                                onClick={() => {
-                                                    const code = `# CORS FÜR BAUTAGEBUCH APP\n<IfModule mod_headers.c>\n    Header always set Access-Control-Allow-Origin "*"\n    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, MKCOL, PROPFIND"\n    Header always set Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With, Range"\n    Header always set Access-Control-Expose-Headers "Content-Location, Location"\n\n    RewriteEngine On\n    RewriteCond %{REQUEST_METHOD} OPTIONS\n    RewriteRule ^(.*)$ $1 [R=200,L]\n</IfModule>`;
-                                                    navigator.clipboard.writeText(code);
-                                                    alert("Code wurde in die Zwischenablage kopiert.");
-                                                }}
-                                                className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 text-white text-[10px] px-2 py-1 rounded border border-white/20"
-                                            >
-                                                Code kopieren
-                                            </button>
-                                        </div>
-                                        <p className="mt-4 text-[12px] text-orange-700 italic">
-                                            Hinweis: Die Änderung greift sofort. Falls du Fehlermeldungen beim Upload erhältst, prüfe ob das <strong>"Bearbeiten erlauben"</strong> Häkchen beim Nextcloud-Share gesetzt ist und ob die Freigabe <strong>kein Passwort</strong> hat (Passwort-Schutz wird aktuell nicht unterstützt).
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
+                <div className="mt-6">
                         <div className="grid lg:grid-cols-3 gap-8">
                     {/* Firmenlogo & Backup */}
                     <div className="space-y-6">
@@ -1342,52 +1303,30 @@ export default function App() {
                         </div>
                     </div>
 
-                    {/* Projekte */}
+                    {/* Einsatzgebiete */}
                     <div className="space-y-4">
-                        <h4 className="text-xs font-bold uppercase text-brand-primary">Projekte (Nextcloud)</h4>
+                        <h4 className="text-xs font-bold uppercase text-brand-primary">Einsatzgebiete / Projekte</h4>
                         <div className="space-y-2 mb-4 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
-                            {config.projects.length === 0 && <p className="text-xs text-gray-400 text-center py-4">Keine Projekte angelegt.</p>}
+                            {config.projects.length === 0 && <p className="text-xs text-gray-400 text-center py-4">Keine Einsatzgebiete angelegt.</p>}
                             {config.projects.map(p => (
                                 <div key={p.token} className="flex flex-col p-2 bg-white rounded border text-sm shadow-sm gap-2">
                                     <div className="flex justify-between items-center">
                                         <span className="font-medium truncate">{p.name}</span>
                                         <div className="flex gap-2">
-                                            <button 
-                                                onClick={async () => {
-                                                    try {
-                                                        await nextcloudService.testConnection(p);
-                                                        alert("Verbindung erfolgreich!");
-                                                    } catch (e: any) {
-                                                        alert(`Verbindung fehlgeschlagen: ${e.message}`);
-                                                    }
-                                                }} 
-                                                className="text-brand-primary text-xs font-bold px-2 py-1 bg-brand-primary/5 rounded border border-brand-primary/10"
-                                            >
-                                                Test
-                                            </button>
-                                            <button onClick={() => { if(confirm("Projekt löschen?")) saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)}) }} className="text-red-400 p-1"><TrashIcon /></button>
+                                            <button onClick={() => { if(confirm("Einsatzgebiet löschen?")) saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)}) }} className="text-red-400 p-1"><TrashIcon /></button>
                                         </div>
                                     </div>
-                                    <div className="text-[10px] text-gray-400 truncate">{p.link}</div>
                                 </div>
                             ))}
                         </div>
                         <div className="space-y-2 bg-white p-3 rounded-lg border shadow-sm">
-                            <input placeholder="Ortsname" value={newProjName} onChange={e => setNewProjName(e.target.value)} className="w-full p-2 border rounded text-sm" />
-                            <input placeholder="Share-Link" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="w-full p-2 border rounded text-sm" />
+                            <input placeholder="Name des Einsatzgebiets" value={newProjName} onChange={e => setNewProjName(e.target.value)} className="w-full p-2 border rounded text-sm" />
                             <Button onClick={() => {
-                                if (!newProjLink.includes('/s/')) {
-                                    return alert("Ungültiger Link. Bitte verwenden Sie einen öffentlichen Freigabe-Link (z.B. https://ihre-nextcloud.de/s/ABC123xyz).");
-                                }
-                                // Extract token more robustly, removing query params or trailing slashes
-                                const tokenPart = newProjLink.split('/s/')[1];
-                                if (!tokenPart) return alert("Ungültiger Link.");
-                                const token = tokenPart.split(/[/?#]/)[0];
-                                
-                                if (!token || !newProjName) return alert("Ungültige Daten.");
-                                saveConfig({...config, projects: [...config.projects, { name: newProjName, link: newProjLink, token }]});
-                                setNewProjName(''); setNewProjLink('');
-                            }} className="w-full">Projekt hinzufügen</Button>
+                                if (!newProjName) return alert("Bitte Namen eingeben.");
+                                const token = Math.random().toString(36).substr(2, 9);
+                                saveConfig({...config, projects: [...config.projects, { name: newProjName, link: '', token }]});
+                                setNewProjName('');
+                            }} className="w-full">Hinzufügen</Button>
                         </div>
                     </div>
 
@@ -1450,9 +1389,8 @@ export default function App() {
                             }} variant="secondary" className="w-full py-1 text-xs">Techniker hinzufügen</Button>
                         </div>
                     </div>
-                        </div>
-                    </>
-                )}
+                </div>
+                </div>
                 
                 <div className="pt-6 mt-8 border-t flex justify-between items-center">
                     <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Verwaltungskonsole v1.2.6</p>
