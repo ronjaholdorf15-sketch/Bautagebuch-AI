@@ -1,5 +1,6 @@
 
 import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import { DiaryEntry } from "../types";
 
 // Helper to convert any browser-supported image File to a PDF-compatible Base64 JPEG
@@ -59,7 +60,6 @@ export const generateDiaryPdf = async (
   // Colors
   const brandBlue = [27, 62, 120]; // #1B3E78
   const textDark = [30, 30, 30];
-  const borderGray = [220, 220, 220];
 
   // --- Header Section ---
   if (companyLogo) {
@@ -86,32 +86,34 @@ export const generateDiaryPdf = async (
   
   yPos += 10;
 
-  // --- Information Grid ---
-  const drawInfoRow = (label: string, value: string, y: number) => {
-    doc.setFillColor(252, 252, 252);
-    doc.rect(margin, y - 5, contentWidth, 8, 'F');
-    doc.setDrawColor(240, 240, 240);
-    doc.line(margin, y + 3, pageWidth - margin, y + 3);
-    
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(100, 100, 100);
-    doc.text(label, margin + 2, y);
-    
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-    doc.text(value || "-", margin + 55, y);
-    return y + 8;
-  };
+  // --- Information Grid using autoTable ---
+  autoTable(doc, {
+    startY: yPos,
+    margin: { left: margin, right: margin },
+    theme: 'plain',
+    styles: { fontSize: 9, cellPadding: 2, textColor: textDark as any },
+    columnStyles: {
+      0: { fontStyle: 'bold', textColor: [100, 100, 100] as any, cellWidth: 50 },
+      1: { cellWidth: 'auto' }
+    },
+    body: [
+      ["PROJEKT / BAUVORHABEN:", projectName],
+      ["DATUM:", entry.date],
+      ["STANDORT / ADRESSE:", entry.location],
+      ["TECHNIKER:", entry.technician],
+      ["WETTERLAGE:", entry.weather],
+      ["HAUPTTÄTIGKEIT:", entry.activityType]
+    ],
+    didDrawCell: (data) => {
+        if (data.section === 'body') {
+            doc.setDrawColor(240, 240, 240);
+            doc.setLineWidth(0.1);
+            doc.line(data.cell.x, data.cell.y + data.cell.height, data.cell.x + data.cell.width, data.cell.y + data.cell.height);
+        }
+    }
+  });
 
-  yPos = drawInfoRow("PROJEKT / BAUVORHABEN:", projectName, yPos);
-  yPos = drawInfoRow("DATUM:", entry.date, yPos);
-  yPos = drawInfoRow("STANDORT / ADRESSE:", entry.location, yPos);
-  yPos = drawInfoRow("TECHNIKER:", entry.technician, yPos);
-  yPos = drawInfoRow("WETTERLAGE:", entry.weather, yPos);
-  yPos = drawInfoRow("HAUPTTÄTIGKEIT:", entry.activityType, yPos);
-
-  yPos += 10;
+  yPos = (doc as any).lastAutoTable.finalY + 10;
 
   const drawSectionHeader = (title: string, y: number, color = brandBlue) => {
     doc.setFillColor(color[0], color[1], color[2]);
@@ -124,6 +126,7 @@ export const generateDiaryPdf = async (
   };
 
   // --- Description ---
+  if (yPos > 250) { doc.addPage(); yPos = 20; }
   yPos = drawSectionHeader("Erledigte Arbeiten / Dokumentation", yPos);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
@@ -132,33 +135,31 @@ export const generateDiaryPdf = async (
   const splitDesc = doc.splitTextToSize(entry.description, contentWidth - 4);
   const descHeight = (splitDesc.length * 5) + 5;
   
-  doc.setDrawColor(borderGray[0], borderGray[1], borderGray[2]);
+  doc.setDrawColor(220, 220, 220);
   doc.setLineWidth(0.1);
   doc.rect(margin, yPos - 3, contentWidth, descHeight);
   doc.text(splitDesc, margin + 2, yPos + 2);
   yPos += descHeight + 10;
 
-  // --- Material ---
+  // --- Material using autoTable ---
   if (entry.materials && entry.materials.length > 0) {
     if (yPos > 240) { doc.addPage(); yPos = 20; }
     yPos = drawSectionHeader("Eingesetztes Material", yPos);
     
-    // WICHTIG: Textfarbe zurück auf Dunkel stellen, da Header sie auf Weiß setzt
-    doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-
-    entry.materials.forEach((m) => {
-        if (yPos > 280) { 
-            doc.addPage(); 
-            yPos = 20; 
-            doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+    autoTable(doc, {
+        startY: yPos - 2,
+        margin: { left: margin, right: margin },
+        theme: 'grid',
+        styles: { fontSize: 9, cellPadding: 3, textColor: textDark as any },
+        headStyles: { fillColor: [245, 245, 245] as any, textColor: [100, 100, 100] as any, fontStyle: 'bold' },
+        head: [['Material / Bezeichnung', 'Menge / Einheit']],
+        body: entry.materials.map(m => [m.name, m.amount]),
+        columnStyles: {
+            1: { halign: 'right', cellWidth: 40 }
         }
-        doc.text(`• ${m.name}`, margin + 2, yPos);
-        doc.text(m.amount, pageWidth - margin - 5, yPos, { align: "right" });
-        yPos += 6;
     });
-    yPos += 10;
+
+    yPos = (doc as any).lastAutoTable.finalY + 10;
   }
 
   // --- Photos Section (Grid 2x4, max 8 per page) ---

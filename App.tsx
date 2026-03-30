@@ -467,14 +467,26 @@ export default function App() {
   };
 
   const downloadBlob = (blob: Blob, filename: string) => {
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      try {
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          
+          // Delay revocation to ensure browser has started the download
+          setTimeout(() => {
+              window.URL.revokeObjectURL(url);
+              if (document.body.contains(a)) {
+                  document.body.removeChild(a);
+              }
+          }, 100);
+      } catch (err) {
+          console.error("Download failed:", err);
+          alert("Download fehlgeschlagen. Bitte versuchen Sie es erneut.");
+      }
   };
 
   const handleManualPdfDownload = async () => {
@@ -483,9 +495,14 @@ export default function App() {
           const project = config.projects[selectedProjectIndex] || { name: 'Entwurf' };
           const logoBase64 = await getLogoAsBase64(config.logo);
           const pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
-          const filename = `Bautagebuch_${entry.date}_${entry.location.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+          
+          // Sanitize filename
+          const safeLocation = entry.location ? entry.location.replace(/[^a-zA-Z0-9]/g, '_') : 'Unbekannt';
+          const filename = `Bautagebuch_${entry.date}_${safeLocation}.pdf`;
+          
           downloadBlob(pdfBlob, filename);
       } catch (err) {
+          console.error("Manual PDF Download Error:", err);
           alert("PDF-Generierung fehlgeschlagen.");
       } finally {
           setIsGeneratingPdfOnly(false);
@@ -594,13 +611,9 @@ export default function App() {
         setLastGeneratedPdf(pdfBlob); 
         
         // Automatically trigger download of the generated PDF
-        const url = URL.createObjectURL(pdfBlob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', `Bautagebuch_${entry.location.replace(/\s+/g, '_')}_${entry.date}.pdf`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const safeLocation = entry.location ? entry.location.replace(/[^a-zA-Z0-9]/g, '_') : 'Unbekannt';
+        const filename = `Bautagebuch_${entry.date}_${safeLocation}.pdf`;
+        downloadBlob(pdfBlob, filename);
       } catch (e: any) {
         throw new Error(`Fehler bei der PDF-Erstellung: ${e.message}`);
       }
@@ -666,6 +679,12 @@ export default function App() {
     setLastGeneratedPdf(null);
     setUploadError(null);
   };
+
+  useEffect(() => {
+    if (isAuthReady && currentUser?.role === 'admin') {
+      handleAnalyzeMaterials();
+    }
+  }, [isAuthReady, currentUser]);
 
   const handleAnalyzeMaterials = async () => {
     setIsAnalyzing(true);
