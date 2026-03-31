@@ -505,14 +505,17 @@ export default function App() {
       
       let errorMsg = "Anmeldung fehlgeschlagen.";
       if (err.message?.includes('401')) {
-        errorMsg += "\n\nFehler 401: Benutzername oder App-Passwort falsch.";
+        errorMsg = "Fehler 401: Benutzername oder App-Passwort falsch.";
       } else if (err.message?.includes('404')) {
-        errorMsg += "\n\nFehler 404: WebDAV-Pfad nicht gefunden. Bitte prüfen Sie die Nextcloud-URL.";
+        errorMsg = "Fehler 404: WebDAV-Pfad nicht gefunden.";
       } else {
-        errorMsg += "\n\nVerbindung zur Nextcloud nicht möglich. Bitte prüfen Sie die URL und Ihre Internetverbindung.";
+        errorMsg = "Verbindung zur Nextcloud nicht möglich.";
       }
       
-      alert(`${errorMsg}\n\nBitte prüfen Sie:\n1. Ist der Benutzername korrekt?\n2. Haben Sie ein GÜLTIGES App-Passwort (nicht das normale Passwort)?\n3. Ist die URL korrekt hinterlegt?`);
+      // Show the actual error message details (including last tried URL)
+      const detailedInfo = err.message || "Unbekannter Fehler";
+      
+      alert(`${errorMsg}\n\nDetails:\n${detailedInfo}\n\nBitte prüfen Sie:\n1. Ist der Benutzername korrekt?\n2. Haben Sie ein GÜLTIGES App-Passwort?\n3. Ist die URL in den Einstellungen korrekt?`);
     }
   };
 
