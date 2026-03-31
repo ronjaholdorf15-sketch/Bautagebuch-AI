@@ -1373,6 +1373,23 @@ export default function App() {
                         </div>
 
                         <div className="space-y-4 border-t pt-4">
+                            <h4 className="text-xs font-bold uppercase text-brand-600">Nextcloud Integration</h4>
+                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-3">
+                                <p className="text-[11px] text-blue-700 leading-relaxed">Geben Sie die Basis-URL Ihrer Nextcloud-Instanz an.</p>
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Nextcloud Server URL</label>
+                                    <input 
+                                        type="url" 
+                                        placeholder="https://nextcloud.it-kom.de" 
+                                        value={config.nextcloudUrl || ''} 
+                                        onChange={e => saveConfig({ ...config, nextcloudUrl: e.target.value })} 
+                                        className="w-full p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4 border-t pt-4">
                             <h4 className="text-xs font-bold uppercase text-brand-600">Backup & Sicherheit</h4>
                             <div className="bg-slate-100 p-4 rounded-xl border space-y-3">
                                 <p className="text-[11px] text-gray-500 leading-relaxed">Sichern Sie Ihre Konfiguration regelmäßig, um Datenverlust bei Browser-Wechsel zu vermeiden.</p>
