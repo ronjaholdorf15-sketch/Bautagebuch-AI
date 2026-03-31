@@ -428,27 +428,18 @@ export default function App() {
       ];
       
       let success = false;
-      let lastError = null;
       let finalWebdavUrl = '';
 
       for (const webdavUrl of pathsToTry) {
-        try {
-          const client = createClient(webdavUrl, {
-            username: normalizedCode,
-            password: normalizedPassword
-          });
-
-          // Test connection by checking if root exists
-          await client.exists("/");
+        const exists = await nextcloudProxy.exists(webdavUrl, { user: normalizedCode, pass: normalizedPassword });
+        if (exists) {
           success = true;
           finalWebdavUrl = webdavUrl;
           break;
-        } catch (e) {
-          lastError = e;
         }
       }
 
-      if (!success) throw lastError;
+      if (!success) throw new Error("401: Verbindung fehlgeschlagen.");
       
       // Success!
       setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl: finalWebdavUrl });
@@ -472,8 +463,8 @@ export default function App() {
         errorMsg += "\n\nFehler 401: Benutzername oder App-Passwort falsch.";
       } else if (err.message?.includes('404')) {
         errorMsg += "\n\nFehler 404: WebDAV-Pfad nicht gefunden. Bitte prüfen Sie die Nextcloud-URL.";
-      } else if (err.name === 'TypeError' || err.message?.includes('Failed to fetch')) {
-        errorMsg += "\n\nNetzwerkfehler: Die Nextcloud blockiert eventuell den Zugriff von dieser App (CORS).";
+      } else {
+        errorMsg += "\n\nVerbindung zur Nextcloud nicht möglich. Bitte prüfen Sie die URL und Ihre Internetverbindung.";
       }
       
       alert(`${errorMsg}\n\nBitte prüfen Sie:\n1. Ist der Benutzername korrekt?\n2. Haben Sie ein GÜLTIGES App-Passwort (nicht das normale Passwort)?\n3. Ist die URL korrekt hinterlegt?`);
@@ -511,6 +502,67 @@ export default function App() {
         setEntry(prev => ({ ...prev, technician: tech.name }));
         setStatus({ step: 'form' });
         alert("Hinweis: Verbindung zur Datenbank fehlgeschlagen. Speichern ist nur lokal möglich.");
+    }
+  };
+
+  // Helper for Nextcloud Proxy
+  const nextcloudProxy = {
+    async exists(url: string, creds: { user: string, pass: string }) {
+      try {
+        const response = await fetch('/api/nextcloud/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url,
+            method: 'PROPFIND',
+            username: creds.user,
+            password: creds.pass,
+            headers: { 'Depth': '0' }
+          })
+        });
+        return response.status === 207 || response.status === 200;
+      } catch (e) {
+        return false;
+      }
+    },
+    async createDirectory(url: string, creds: { user: string, pass: string }) {
+      const response = await fetch('/api/nextcloud/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url,
+          method: 'MKCOL',
+          username: creds.user,
+          password: creds.pass
+        })
+      });
+      if (!response.ok && response.status !== 405) { // 405 means already exists
+        throw new Error(`Fehler beim Erstellen des Ordners: ${response.status}`);
+      }
+    },
+    async putFileContents(url: string, data: Blob, creds: { user: string, pass: string }) {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve) => {
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(data);
+      });
+      const base64 = await base64Promise;
+
+      const response = await fetch('/api/nextcloud/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url,
+          method: 'PUT',
+          username: creds.user,
+          password: creds.pass,
+          data: base64,
+          headers: { 'Content-Type': 'application/pdf' }
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`Fehler beim Upload: ${response.status}`);
+      }
     }
   };
 
@@ -681,30 +733,25 @@ export default function App() {
       if (nextcloudCreds && pdfBlob) {
         setUploadMessage("Lade in Nextcloud hoch...");
         try {
-          const client = createClient(nextcloudCreds.webdavUrl, {
-            username: nextcloudCreds.user,
-            password: nextcloudCreds.pass
-          });
-
           const project = config.projects[selectedProjectIndex];
-          const folderPath = project.nextcloudPath || '/Bautagebuch';
+          const folderPath = (project.nextcloudPath || '/Bautagebuch').replace(/\/$/, '');
           
           // Ensure folder exists (recursive)
           const folders = folderPath.split('/').filter(f => f);
           let currentPath = '';
           for (const folder of folders) {
             currentPath += `/${folder}`;
-            if (!(await client.exists(currentPath))) {
-              await client.createDirectory(currentPath);
+            const fullUrl = `${nextcloudCreds.webdavUrl.replace(/\/$/, '')}${currentPath}`;
+            if (!(await nextcloudProxy.exists(fullUrl, nextcloudCreds))) {
+              await nextcloudProxy.createDirectory(fullUrl, nextcloudCreds);
             }
           }
 
           const safeLocation = entry.location ? entry.location.replace(/[^a-zA-Z0-9]/g, '_') : 'Unbekannt';
           const filename = `Bautagebuch_${entry.date}_${safeLocation}.pdf`;
-          const fullPath = `${currentPath}/${filename}`;
-
-          const arrayBuffer = await pdfBlob.arrayBuffer();
-          await client.putFileContents(fullPath, arrayBuffer);
+          const uploadUrl = `${nextcloudCreds.webdavUrl.replace(/\/$/, '')}${folderPath}/${filename}`;
+          
+          await nextcloudProxy.putFileContents(uploadUrl, pdfBlob, nextcloudCreds);
           setUploadMessage(prev => prev + " (Erfolgreich)");
         } catch (ncError: any) {
           console.error("Nextcloud Upload failed:", ncError);
