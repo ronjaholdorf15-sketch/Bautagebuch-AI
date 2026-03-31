@@ -27,6 +27,7 @@ import {
 } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+import { createClient } from 'webdav';
 
 // Icons
 const CameraIcon = () => (
@@ -247,6 +248,7 @@ export default function App() {
   const [isEnhancingText, setIsEnhancingText] = useState(false);
   const [isGeneratingMissing, setIsGeneratingMissing] = useState(false);
   const [isGeneratingPdfOnly, setIsGeneratingPdfOnly] = useState(false);
+  const [nextcloudCreds, setNextcloudCreds] = useState<{ user: string, pass: string } | null>(null);
   
   // Firebase Auth State
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -388,13 +390,15 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  // Listen for Nextcloud OAuth success (REMOVED)
+  
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const normalizedCode = loginCode.trim().toUpperCase();
+    const normalizedCode = loginCode.trim();
     const normalizedPassword = loginPassword.trim();
 
-    // 1. Master Admin Override
+    // 1. Master Admin Override (Local fallback)
     if (normalizedCode === 'ADMIN' && normalizedPassword === 'admin123') {
         const adminTech: Technician = {
             id: 'admin-master',
@@ -407,20 +411,38 @@ export default function App() {
         return;
     }
 
-    // 2. Find technician by code in local config
-    let tech = config.technicians.find(t => t.code.toUpperCase() === normalizedCode);
+    // 2. Nextcloud Login attempt (Simple Method)
+    setStatus({ step: 'uploading' });
+    setUploadMessage("Verbinde mit Nextcloud...");
     
-    if (!tech) {
-        alert("Benutzer nicht gefunden. Bitte Kürzel prüfen.");
-        return;
-    }
+    try {
+      const nextcloudUrl = config.nextcloudUrl || 'https://nextcloud.it-kom.de';
+      const client = createClient(nextcloudUrl, {
+        username: normalizedCode,
+        password: normalizedPassword
+      });
 
-    if (tech.password && tech.password !== normalizedPassword) {
-        alert("Falsches Passwort.");
-        return;
-    }
+      // Test connection by checking if root exists
+      await client.exists("/");
+      
+      // Success!
+      setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword });
+      
+      const tech: Technician = {
+        id: normalizedCode,
+        name: normalizedCode,
+        code: normalizedCode.toUpperCase().substring(0, 3),
+        role: 'user',
+        nextcloudUser: normalizedCode,
+        nextcloudPass: normalizedPassword
+      };
 
-    await performFirebaseLogin(tech);
+      await performFirebaseLogin(tech);
+    } catch (err: any) {
+      console.error("Nextcloud Login failed:", err);
+      setStatus({ step: 'login' });
+      alert("Anmeldung fehlgeschlagen. Bitte Nextcloud-Benutzername und App-Passwort prüfen.");
+    }
   };
 
   const performFirebaseLogin = async (tech: Technician) => {
@@ -619,6 +641,44 @@ export default function App() {
       }
       
       localStorage.removeItem(DRAFT_KEY);
+      
+      // 3. Upload to Nextcloud (if credentials available)
+      if (nextcloudCreds && pdfBlob) {
+        setUploadMessage("Lade in Nextcloud hoch...");
+        try {
+          const nextcloudUrl = config.nextcloudUrl || 'https://nextcloud.it-kom.de';
+          const client = createClient(nextcloudUrl, {
+            username: nextcloudCreds.user,
+            password: nextcloudCreds.pass
+          });
+
+          const project = config.projects[selectedProjectIndex];
+          const folderPath = project.nextcloudPath || '/Bautagebuch';
+          
+          // Ensure folder exists (recursive)
+          const folders = folderPath.split('/').filter(f => f);
+          let currentPath = '';
+          for (const folder of folders) {
+            currentPath += `/${folder}`;
+            if (!(await client.exists(currentPath))) {
+              await client.createDirectory(currentPath);
+            }
+          }
+
+          const safeLocation = entry.location ? entry.location.replace(/[^a-zA-Z0-9]/g, '_') : 'Unbekannt';
+          const filename = `Bautagebuch_${entry.date}_${safeLocation}.pdf`;
+          const fullPath = `${currentPath}/${filename}`;
+
+          const arrayBuffer = await pdfBlob.arrayBuffer();
+          await client.putFileContents(fullPath, arrayBuffer);
+          setUploadMessage(prev => prev + " (Erfolgreich)");
+        } catch (ncError: any) {
+          console.error("Nextcloud Upload failed:", ncError);
+          // Don't fail the whole process if only NC upload fails, but inform user
+          setUploadMessage(prev => prev + " (Fehlgeschlagen: " + (ncError.message || "WebDAV Fehler") + ")");
+        }
+      }
+
       setStatus({ step: 'success' });
       
       // Refresh material analysis if admin
@@ -875,28 +935,33 @@ export default function App() {
                   </div>
                   <form onSubmit={handleLogin} className="space-y-6">
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Benutzerkürzel</label>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Nextcloud Benutzername</label>
                         <input 
                           type="text" 
                           value={loginCode} 
                           onChange={e => setLoginCode(e.target.value)} 
-                          placeholder="ABC" 
-                          className="w-full text-center text-2xl font-mono p-5 border border-slate-200 rounded-2xl uppercase outline-none input-focus bg-slate-50/50" 
+                          placeholder="Benutzername" 
+                          className="w-full text-center text-xl font-medium p-5 border border-slate-200 rounded-2xl outline-none input-focus bg-slate-50/50" 
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Passwort</label>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">App-Passwort</label>
                         <input 
                           type="password" 
                           value={loginPassword} 
                           onChange={e => setLoginPassword(e.target.value)} 
-                          placeholder="••••" 
-                          className="w-full text-center text-2xl p-5 border border-slate-200 rounded-2xl outline-none input-focus bg-slate-50/50" 
+                          placeholder="•••• •••• •••• ••••" 
+                          className="w-full text-center text-xl p-5 border border-slate-200 rounded-2xl outline-none input-focus bg-slate-50/50" 
                         />
                       </div>
                       <Button type="submit" className="w-full py-5 text-lg font-black rounded-2xl shadow-xl shadow-brand-primary/20 bg-brand-primary hover:bg-brand-primary/90 active:scale-[0.98] transition-all">
-                        LOGIN
+                        ANMELDEN & STARTEN
                       </Button>
+                      
+                      <p className="text-[10px] text-slate-400 text-center mt-4 leading-relaxed">
+                        Nutzen Sie Ihren Nextcloud-Benutzernamen und ein <br/>
+                        <a href={`${config.nextcloudUrl || 'https://nextcloud.it-kom.de'}/index.php/settings/user/security`} target="_blank" rel="noopener noreferrer" className="text-brand-primary underline">App-Passwort</a> aus Ihren Einstellungen.
+                      </p>
                   </form>
               </div>
           </div>
@@ -1330,7 +1395,10 @@ export default function App() {
                             {config.projects.map(p => (
                                 <div key={p.token} className="flex flex-col p-2 bg-white rounded border text-sm shadow-sm gap-2">
                                     <div className="flex justify-between items-center">
-                                        <span className="font-medium truncate">{p.name}</span>
+                                        <div className="flex-1">
+                                            <span className="font-medium truncate">{p.name}</span>
+                                            <p className="text-[10px] text-slate-400">Pfad: {p.nextcloudPath || '/Bautagebuch'}</p>
+                                        </div>
                                         <div className="flex gap-2">
                                             <button onClick={() => { if(confirm("Einsatzgebiet löschen?")) saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)}) }} className="text-red-400 p-1"><TrashIcon /></button>
                                         </div>
@@ -1340,11 +1408,13 @@ export default function App() {
                         </div>
                         <div className="space-y-2 bg-white p-3 rounded-lg border shadow-sm">
                             <input placeholder="Name des Einsatzgebiets" value={newProjName} onChange={e => setNewProjName(e.target.value)} className="w-full p-2 border rounded text-sm" />
+                            <input placeholder="Nextcloud Pfad (z.B. /Projekte/Berlin)" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="w-full p-2 border rounded text-sm" />
                             <Button onClick={() => {
                                 if (!newProjName) return alert("Bitte Namen eingeben.");
                                 const token = Math.random().toString(36).substr(2, 9);
-                                saveConfig({...config, projects: [...config.projects, { name: newProjName, link: '', token }]});
+                                saveConfig({...config, projects: [...config.projects, { name: newProjName, link: '', token, nextcloudPath: newProjLink || '/Bautagebuch' }]});
                                 setNewProjName('');
+                                setNewProjLink('');
                             }} className="w-full">Hinzufügen</Button>
                         </div>
                     </div>

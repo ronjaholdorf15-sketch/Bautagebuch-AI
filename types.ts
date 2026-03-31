@@ -3,6 +3,7 @@ export interface PublicProject {
   name: string;
   link: string; // The full public share URL
   token: string; // Extracted from link
+  nextcloudPath?: string; // Specific folder in Nextcloud for this project
 }
 
 export interface Technician {
@@ -11,12 +12,15 @@ export interface Technician {
   code: string; // Short code (e.g. MM)
   password?: string; // Login Password
   role: 'admin' | 'user'; // Rights management
+  nextcloudUser?: string; // Nextcloud Username
+  nextcloudPass?: string; // Nextcloud App Password
 }
 
 export interface AppConfig {
   technicians: Technician[];
   projects: PublicProject[];
   logo?: string; // Base64 encoded custom logo
+  nextcloudUrl?: string; // Base URL of the Nextcloud instance
 }
 
 export interface MaterialItem {
