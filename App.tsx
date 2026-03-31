@@ -417,36 +417,37 @@ export default function App() {
     
     try {
       // Robust URL Cleaning
-      let baseUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de')
-        .split('/index.php')[0]
-        .split('/apps/')[0]
-        .replace(/\/$/, '');
+      const rawUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de');
+      let baseUrl = rawUrl.split('/index.php')[0].split('/apps/')[0].replace(/\/$/, '');
       
       // Username variations
       const userInputs = [
         normalizedCode,
         normalizedCode.split('@')[0], // Ronja Holdorf
         normalizedCode.split('@')[0].replace(/\s+/g, ''), // RonjaHoldorf
-        normalizedCode.split('@')[0].toLowerCase().replace(/\s+/g, ''), // ronjaholdorf
+        'ronja.holdorf15@gmail.com', // User's email (common in IONOS)
+        'ronja.holdorf15' // Email prefix
       ];
-      // Remove duplicates
+      // Remove duplicates and empty strings
       const uniqueUsers = Array.from(new Set(userInputs.filter(u => u)));
 
-      // Path variations
+      // Path variations (including subfolders common in some setups)
       const basePaths = [
         '/remote.php/dav/files/',
         '/index.php/remote.php/dav/files/',
         '/remote.php/webdav/',
         '/index.php/remote.php/webdav/',
         '/remote.php/dav/',
-        '/index.php/remote.php/dav/'
+        '/index.php/remote.php/dav/',
+        '/nextcloud/remote.php/dav/files/',
+        '/nextcloud/index.php/remote.php/dav/files/'
       ];
       
       let success = false;
       let finalWebdavUrl = '';
       let effectiveUsername = '';
       let isAuthError = false;
-      let lastTriedUrl = '';
+      let triedUrls: string[] = [];
 
       // Systematic discovery
       discoveryLoop:
@@ -457,7 +458,9 @@ export default function App() {
             ? `${baseUrl}${basePath}`
             : `${baseUrl}${basePath}${encodeURIComponent(user)}/`;
           
-          lastTriedUrl = webdavUrl;
+          triedUrls.push(webdavUrl);
+          if (triedUrls.length > 20) triedUrls.shift(); // Keep only last 20
+
           try {
             const exists = await nextcloudProxy.exists(webdavUrl, { user, pass: normalizedPassword });
             if (exists) {
@@ -469,10 +472,7 @@ export default function App() {
           } catch (e: any) {
             if (e.message === "AUTH_FAILED") {
               isAuthError = true;
-              // If we get 401 on a specific user path, that user is likely correct but password/app-pass is wrong
-              if (!isGenericPath) {
-                effectiveUsername = user;
-              }
+              if (!isGenericPath) effectiveUsername = user;
             }
           }
         }
@@ -483,7 +483,7 @@ export default function App() {
       }
       
       if (!success) {
-          throw new Error(`404: WebDAV-Pfad nicht gefunden.\nLetzter Versuch: ${lastTriedUrl}`);
+          throw new Error(`404: WebDAV-Pfad nicht gefunden.\n\nProbiert wurden unter anderem:\n${triedUrls.slice(-3).join('\n')}`);
       }
       
       // Success!
