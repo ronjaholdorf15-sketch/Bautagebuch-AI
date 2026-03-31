@@ -416,28 +416,54 @@ export default function App() {
     setUploadMessage("Verbinde mit Nextcloud...");
     
     try {
-      // 1. Check for manual override
+      // 1. Check for manual override (Smart Template Logic)
       if (config.manualWebdavUrl) {
-          const exists = await nextcloudProxy.exists(config.manualWebdavUrl, { user: normalizedCode, pass: normalizedPassword });
-          if (exists) {
-              setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl: config.manualWebdavUrl });
-              const tech: Technician = {
-                  id: normalizedCode,
-                  name: normalizedCode,
-                  code: normalizedCode.toUpperCase().substring(0, 3).replace(/[^A-Z]/g, 'X'),
-                  role: 'user',
-                  nextcloudUser: normalizedCode,
-                  nextcloudPass: normalizedPassword
-              };
-              await performFirebaseLogin(tech);
-              return;
-          } else {
-              // If manual fails, we might want to try discovery anyway or show 401
-              console.warn("Manual WebDAV URL failed, falling back to discovery");
+          setUploadMessage("Prüfe Pfad-Vorlage...");
+          
+          // Determine the base path (everything before /files/)
+          const hasFilesPart = config.manualWebdavUrl.includes('/files/');
+          const basePath = hasFilesPart ? config.manualWebdavUrl.split('/files/')[0] + '/files/' : config.manualWebdavUrl;
+          
+          // Try variations for the current user based on the manual template
+          const manualVariations = [
+              config.manualWebdavUrl, // 1. Exactly as entered
+              `${basePath}${encodeURIComponent(normalizedCode)}/`, // 2. Base + Current User
+              `${basePath}${encodeURIComponent(normalizedCode.replace(/\s+/g, ''))}/`, // 3. Base + User (no spaces)
+              `${basePath}${encodeURIComponent(normalizedCode.split('@')[0])}/` // 4. Base + Email-Prefix
+          ];
+
+          // Filter duplicates and empty strings
+          const uniqueManualUrls = [...new Set(manualVariations)].filter(u => u && u.startsWith('http'));
+
+          for (const testUrl of uniqueManualUrls) {
+              try {
+                  const exists = await nextcloudProxy.exists(testUrl, { user: normalizedCode, pass: normalizedPassword });
+                  if (exists) {
+                      setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl: testUrl });
+                      const tech: Technician = {
+                          id: normalizedCode,
+                          name: normalizedCode,
+                          code: normalizedCode.toUpperCase().substring(0, 3).replace(/[^A-Z]/g, 'X'),
+                          role: 'user',
+                          nextcloudUser: normalizedCode,
+                          nextcloudPass: normalizedPassword
+                      };
+                      await performFirebaseLogin(tech);
+                      return;
+                  }
+              } catch (e: any) {
+                  if (e.message === "AUTH_FAILED") throw new Error("401: Benutzername oder App-Passwort falsch.");
+                  // Continue to next variation if just 404
+              }
+          }
+          
+          // If we are here, manual path variations failed
+          if (hasFilesPart) {
+              throw new Error(`404: WebDAV-Pfad nicht gefunden.\nDie Vorlage wurde geprüft, aber kein gültiger Ordner für "${normalizedCode}" gefunden.`);
           }
       }
 
-      // 2. Robust URL Cleaning
+      // 2. Fallback to Robust URL Discovery (if no manual path or manual failed)
       const rawUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de');
       let baseUrl = rawUrl.split('/index.php')[0].split('/apps/')[0].replace(/\/$/, '');
       
@@ -1109,6 +1135,14 @@ export default function App() {
                       <Button type="submit" className="w-full py-5 text-lg font-black rounded-2xl shadow-xl shadow-brand-primary/20 bg-brand-primary hover:bg-brand-primary/90 active:scale-[0.98] transition-all">
                         ANMELDEN & STARTEN
                       </Button>
+
+                      <button 
+                        type="button"
+                        onClick={() => setShowHelp(true)}
+                        className="w-full text-[10px] text-slate-400 font-bold uppercase tracking-widest hover:text-brand-primary transition-colors py-2"
+                      >
+                        Hilfe zur Verbindung
+                      </button>
                       
                       <p className="text-[10px] text-slate-400 text-center mt-4 leading-relaxed">
                         Nutzen Sie Ihren Nextcloud-Benutzernamen und ein <br/>
@@ -1692,6 +1726,68 @@ export default function App() {
                     <Button variant="outline" onClick={() => { setShowSettings(false); setEditingTechId(null); setShowHelp(false); }}>Schließen</Button>
                 </div>
             </div>
+        </div>
+      )}
+
+      {showHelp && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-8 animate-scale-in">
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase">Hilfe zur Verbindung</h3>
+              <button onClick={() => setShowHelp(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                <CloseIcon />
+              </button>
+            </div>
+            
+            <div className="space-y-8">
+              <section className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 bg-brand-primary text-white rounded-full flex items-center justify-center font-black text-sm">1</span>
+                  <h4 className="font-bold text-slate-800">App-Passwort erstellen</h4>
+                </div>
+                <p className="text-sm text-slate-600 leading-relaxed ml-11">
+                  Loggen Sie sich im Browser in Ihre Nextcloud ein. Gehen Sie zu <span className="font-bold">Einstellungen &rarr; Sicherheit</span>. 
+                  Ganz unten bei "Geräte & Sitzungen" geben Sie "Bautagebuch" ein und klicken auf "Neues App-Passwort erstellen". 
+                  Kopieren Sie das Passwort (z.B. <code className="bg-slate-100 px-1 rounded">abcd-efgh-ijkl-mnop</code>).
+                </p>
+              </section>
+
+              <section className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 bg-brand-primary text-white rounded-full flex items-center justify-center font-black text-sm">2</span>
+                  <h4 className="font-bold text-slate-800">WebDAV-Link finden</h4>
+                </div>
+                <p className="text-sm text-slate-600 leading-relaxed ml-11">
+                  Klicken Sie in Nextcloud links auf <span className="font-bold">Dateien</span>, dann ganz unten links auf das <span className="font-bold">Zahnrad (Einstellungen)</span>. 
+                  Kopieren Sie den Link unter "WebDAV". Er sieht oft so aus:<br/>
+                  <code className="text-[10px] bg-slate-100 p-1 block mt-2 rounded break-all">https://.../remote.php/dav/files/benutzer/</code>
+                </p>
+              </section>
+
+              <section className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 bg-brand-primary text-white rounded-full flex items-center justify-center font-black text-sm">3</span>
+                  <h4 className="font-bold text-slate-800">In der App eintragen</h4>
+                </div>
+                <p className="text-sm text-slate-600 leading-relaxed ml-11">
+                  Melden Sie sich als Administrator an (Code: <span className="font-bold">ADMIN</span>, Passwort: <span className="font-bold">admin123</span>). 
+                  Gehen Sie in die Einstellungen und fügen Sie den kopierten Link bei <span className="font-bold">"Manueller WebDAV-Pfad"</span> ein.
+                </p>
+              </section>
+
+              <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100">
+                <h5 className="font-bold text-blue-800 text-sm mb-2 flex items-center gap-2">
+                  <InfoIcon /> Wichtiger Hinweis für IONOS
+                </h5>
+                <p className="text-xs text-blue-700 leading-relaxed">
+                  Bei IONOS-Nextcloud ist der Benutzername oft identisch mit Ihrem Namen in der Cloud (z.B. "Ronja Holdorf"). 
+                  Achten Sie darauf, dass der manuelle Pfad exakt so endet, wie er in Nextcloud angezeigt wird.
+                </p>
+              </div>
+            </div>
+
+            <Button onClick={() => setShowHelp(false)} className="w-full mt-8 py-4 rounded-2xl font-bold">Verstanden</Button>
+          </div>
         </div>
       )}
     </div>
