@@ -421,25 +421,35 @@ export default function App() {
         .replace(/\/index\.php\/?$/, '')
         .replace(/\/$/, '');
       
-      // Try two common Nextcloud WebDAV paths
+      // Try common Nextcloud WebDAV paths
       const pathsToTry = [
         `${baseUrl}/remote.php/dav/files/${encodeURIComponent(normalizedCode)}/`,
-        `${baseUrl}/remote.php/webdav/`
+        `${baseUrl}/remote.php/webdav/`,
+        `${baseUrl}/remote.php/dav/`
       ];
       
       let success = false;
       let finalWebdavUrl = '';
+      let isAuthError = false;
 
       for (const webdavUrl of pathsToTry) {
-        const exists = await nextcloudProxy.exists(webdavUrl, { user: normalizedCode, pass: normalizedPassword });
-        if (exists) {
-          success = true;
-          finalWebdavUrl = webdavUrl;
-          break;
+        try {
+          const exists = await nextcloudProxy.exists(webdavUrl, { user: normalizedCode, pass: normalizedPassword });
+          if (exists) {
+            success = true;
+            finalWebdavUrl = webdavUrl;
+            break;
+          }
+        } catch (e: any) {
+          if (e.message === "AUTH_FAILED") {
+            isAuthError = true;
+            break;
+          }
         }
       }
 
-      if (!success) throw new Error("401: Verbindung fehlgeschlagen.");
+      if (isAuthError) throw new Error("401: Benutzername oder App-Passwort falsch.");
+      if (!success) throw new Error("404: Verbindung zur Nextcloud fehlgeschlagen.");
       
       // Success!
       setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl: finalWebdavUrl });
@@ -520,8 +530,10 @@ export default function App() {
             headers: { 'Depth': '0' }
           })
         });
+        if (response.status === 401) throw new Error("AUTH_FAILED");
         return response.status === 207 || response.status === 200;
-      } catch (e) {
+      } catch (e: any) {
+        if (e.message === "AUTH_FAILED") throw e;
         return false;
       }
     },
@@ -1043,6 +1055,11 @@ export default function App() {
                         Nutzen Sie Ihren Nextcloud-Benutzernamen und ein <br/>
                         <a href={`${(config.nextcloudUrl || 'https://nextcloud.it-kom.de').replace(/\/index\.php\/?$/, '')}/index.php/settings/user/security`} target="_blank" rel="noopener noreferrer" className="text-brand-primary underline font-bold">App-Passwort hier erstellen</a>
                       </p>
+                      <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <p className="text-[9px] text-slate-500 leading-tight">
+                          <span className="font-bold text-slate-700">Tipp:</span> Ihr WebDAV-Benutzername kann sich von Ihrer E-Mail unterscheiden. Sie finden ihn in Nextcloud unter <span className="italic">Einstellungen &rarr; Mobil & Desktop</span> ganz unten.
+                        </p>
+                      </div>
                   </form>
               </div>
           </div>
