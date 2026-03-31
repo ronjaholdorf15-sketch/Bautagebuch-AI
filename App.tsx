@@ -416,63 +416,75 @@ export default function App() {
     setUploadMessage("Verbinde mit Nextcloud...");
     
     try {
-      // Robust URL Cleaning: Extract only the domain part
+      // Robust URL Cleaning
       let baseUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de')
         .split('/index.php')[0]
         .split('/apps/')[0]
         .replace(/\/$/, '');
       
-      // Handle Federated Cloud IDs (e.g. user@server.com -> user)
-      let effectiveUsername = normalizedCode;
-      if (normalizedCode.includes('@')) {
-          // If it contains the domain, it's likely a Federated ID
-          if (normalizedCode.includes(baseUrl.replace(/^https?:\/\//, ''))) {
-              effectiveUsername = normalizedCode.split('@')[0];
-          }
-      }
+      // Username variations
+      const userInputs = [
+        normalizedCode,
+        normalizedCode.split('@')[0], // Ronja Holdorf
+        normalizedCode.split('@')[0].replace(/\s+/g, ''), // RonjaHoldorf
+        normalizedCode.split('@')[0].toLowerCase().replace(/\s+/g, ''), // ronjaholdorf
+      ];
+      // Remove duplicates
+      const uniqueUsers = Array.from(new Set(userInputs.filter(u => u)));
 
-      // Try all common Nextcloud WebDAV paths in order of probability
-      const pathsToTry = [
-        `${baseUrl}/remote.php/dav/files/${encodeURIComponent(effectiveUsername)}/`,
-        `${baseUrl}/remote.php/dav/files/${encodeURIComponent(normalizedCode)}/`,
-        `${baseUrl}/remote.php/webdav/`,
-        `${baseUrl}/remote.php/dav/`,
-        `${baseUrl}/public.php/webdav/`
+      // Path variations
+      const basePaths = [
+        '/remote.php/dav/files/',
+        '/index.php/remote.php/dav/files/',
+        '/remote.php/webdav/',
+        '/index.php/remote.php/webdav/',
+        '/remote.php/dav/',
+        '/index.php/remote.php/dav/'
       ];
       
       let success = false;
       let finalWebdavUrl = '';
+      let effectiveUsername = '';
       let isAuthError = false;
+      let lastTriedUrl = '';
 
-      for (const webdavUrl of pathsToTry) {
-        try {
-          const exists = await nextcloudProxy.exists(webdavUrl, { user: effectiveUsername, pass: normalizedPassword });
-          if (exists) {
-            success = true;
-            finalWebdavUrl = webdavUrl;
-            break;
-          }
+      // Systematic discovery
+      discoveryLoop:
+      for (const basePath of basePaths) {
+        for (const user of uniqueUsers) {
+          const isGenericPath = basePath.endsWith('/webdav/') || basePath.endsWith('/dav/');
+          const webdavUrl = isGenericPath 
+            ? `${baseUrl}${basePath}`
+            : `${baseUrl}${basePath}${encodeURIComponent(user)}/`;
           
-          // Also try with full code if split failed
-          if (effectiveUsername !== normalizedCode) {
-            const existsFull = await nextcloudProxy.exists(webdavUrl, { user: normalizedCode, pass: normalizedPassword });
-            if (existsFull) {
+          lastTriedUrl = webdavUrl;
+          try {
+            const exists = await nextcloudProxy.exists(webdavUrl, { user, pass: normalizedPassword });
+            if (exists) {
               success = true;
-              effectiveUsername = normalizedCode;
+              effectiveUsername = user;
               finalWebdavUrl = webdavUrl;
-              break;
+              break discoveryLoop;
             }
-          }
-        } catch (e: any) {
-          if (e.message === "AUTH_FAILED") {
-            isAuthError = true;
-            // Don't break yet, maybe another path works with these credentials
+          } catch (e: any) {
+            if (e.message === "AUTH_FAILED") {
+              isAuthError = true;
+              // If we get 401 on a specific user path, that user is likely correct but password/app-pass is wrong
+              if (!isGenericPath) {
+                effectiveUsername = user;
+              }
+            }
           }
         }
       }
 
-      if (isAuthError && !success) throw new Error("401: Benutzername oder App-Passwort falsch.");
-      if (!success) throw new Error("404: WebDAV-Pfad nicht gefunden. Bitte prüfen Sie die Nextcloud-URL.");
+      if (isAuthError && !success) {
+          throw new Error(`401: Benutzername oder App-Passwort falsch.\n(Geprüft für: ${effectiveUsername || normalizedCode})`);
+      }
+      
+      if (!success) {
+          throw new Error(`404: WebDAV-Pfad nicht gefunden.\nLetzter Versuch: ${lastTriedUrl}`);
+      }
       
       // Success!
       setNextcloudCreds({ user: effectiveUsername, pass: normalizedPassword, webdavUrl: finalWebdavUrl });
