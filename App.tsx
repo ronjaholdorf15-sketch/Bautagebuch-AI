@@ -472,16 +472,15 @@ export default function App() {
       // Username variations
       const userInputs = [
         normalizedCode,
-        normalizedCode.split('@')[0], // Ronja Holdorf
-        normalizedCode.split('@')[0].replace(/\s+/g, ''), // RonjaHoldorf
-        normalizedCode.replace(/\s+/g, '%20'), // Manual space encoding
-        'ronja.holdorf15@gmail.com', // User's email (common in IONOS)
-        'ronja.holdorf15' // Email prefix
+        normalizedCode.split('@')[0], // Extract name if email was entered
+        normalizedCode.replace(/\s+/g, ''), // Name without spaces
+        'ronja.holdorf15@gmail.com',
+        'ronja.holdorf15'
       ];
       // Remove duplicates and empty strings
       const uniqueUsers = Array.from(new Set(userInputs.filter(u => u)));
 
-      // Path variations (including subfolders common in some setups)
+      // Path variations
       const basePaths = [
         '/remote.php/dav/files/',
         '/index.php/remote.php/dav/files/',
@@ -504,14 +503,17 @@ export default function App() {
       for (const basePath of basePaths) {
         for (const user of uniqueUsers) {
           const isGenericPath = basePath.endsWith('/webdav/') || basePath.endsWith('/dav/');
+          
+          // CRITICAL: We use encodeURIComponent only on the user part to handle spaces correctly
           const webdavUrl = isGenericPath 
             ? `${baseUrl}${basePath}`
             : `${baseUrl}${basePath}${encodeURIComponent(user)}/`;
           
           triedUrls.push(webdavUrl);
-          if (triedUrls.length > 20) triedUrls.shift(); // Keep only last 20
+          if (triedUrls.length > 20) triedUrls.shift();
 
           try {
+            // We try the login with the current user variation
             const exists = await nextcloudProxy.exists(webdavUrl, { user, pass: normalizedPassword });
             if (exists) {
               success = true;
@@ -522,6 +524,7 @@ export default function App() {
           } catch (e: any) {
             if (e.message === "AUTH_FAILED") {
               isAuthError = true;
+              // Keep track of which user caused the auth error to help debugging
               if (!isGenericPath) effectiveUsername = user;
             }
           }
