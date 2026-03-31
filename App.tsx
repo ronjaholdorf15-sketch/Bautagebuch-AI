@@ -248,7 +248,7 @@ export default function App() {
   const [isEnhancingText, setIsEnhancingText] = useState(false);
   const [isGeneratingMissing, setIsGeneratingMissing] = useState(false);
   const [isGeneratingPdfOnly, setIsGeneratingPdfOnly] = useState(false);
-  const [nextcloudCreds, setNextcloudCreds] = useState<{ user: string, pass: string } | null>(null);
+  const [nextcloudCreds, setNextcloudCreds] = useState<{ user: string, pass: string, webdavUrl: string } | null>(null);
   
   // Firebase Auth State
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -416,8 +416,15 @@ export default function App() {
     setUploadMessage("Verbinde mit Nextcloud...");
     
     try {
-      const nextcloudUrl = config.nextcloudUrl || 'https://nextcloud.it-kom.de';
-      const client = createClient(nextcloudUrl, {
+      // Clean URL: Remove index.php and trailing slashes
+      let baseUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de')
+        .replace(/\/index\.php\/?$/, '')
+        .replace(/\/$/, '');
+      
+      // Nextcloud WebDAV endpoint for this specific user
+      const webdavUrl = `${baseUrl}/remote.php/dav/files/${normalizedCode}/`;
+      
+      const client = createClient(webdavUrl, {
         username: normalizedCode,
         password: normalizedPassword
       });
@@ -426,7 +433,7 @@ export default function App() {
       await client.exists("/");
       
       // Success!
-      setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword });
+      setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl });
       
       const tech: Technician = {
         id: normalizedCode,
@@ -441,7 +448,7 @@ export default function App() {
     } catch (err: any) {
       console.error("Nextcloud Login failed:", err);
       setStatus({ step: 'login' });
-      alert("Anmeldung fehlgeschlagen. Bitte Nextcloud-Benutzername und App-Passwort prüfen.");
+      alert("Anmeldung fehlgeschlagen. Bitte prüfen Sie:\n1. Ist die Nextcloud-URL korrekt?\n2. Ist der Benutzername korrekt?\n3. Haben Sie ein gültiges App-Passwort verwendet?");
     }
   };
 
@@ -646,8 +653,7 @@ export default function App() {
       if (nextcloudCreds && pdfBlob) {
         setUploadMessage("Lade in Nextcloud hoch...");
         try {
-          const nextcloudUrl = config.nextcloudUrl || 'https://nextcloud.it-kom.de';
-          const client = createClient(nextcloudUrl, {
+          const client = createClient(nextcloudCreds.webdavUrl, {
             username: nextcloudCreds.user,
             password: nextcloudCreds.pass
           });
