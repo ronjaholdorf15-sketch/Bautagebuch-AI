@@ -966,7 +966,7 @@ export default function App() {
                       
                       <p className="text-[10px] text-slate-400 text-center mt-4 leading-relaxed">
                         Nutzen Sie Ihren Nextcloud-Benutzernamen und ein <br/>
-                        <a href={`${config.nextcloudUrl || 'https://nextcloud.it-kom.de'}/index.php/settings/user/security`} target="_blank" rel="noopener noreferrer" className="text-brand-primary underline">App-Passwort</a> aus Ihren Einstellungen.
+                        <a href={`${(config.nextcloudUrl || 'https://nextcloud.it-kom.de').replace(/\/index\.php\/?$/, '')}/index.php/settings/user/security`} target="_blank" rel="noopener noreferrer" className="text-brand-primary underline font-bold">App-Passwort hier erstellen</a>
                       </p>
                   </form>
               </div>
@@ -1384,13 +1384,34 @@ export default function App() {
                                 <p className="text-[11px] text-blue-700 leading-relaxed">Geben Sie die Basis-URL Ihrer Nextcloud-Instanz an.</p>
                                 <div className="space-y-1">
                                     <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Nextcloud Server URL</label>
-                                    <input 
-                                        type="url" 
-                                        placeholder="https://nextcloud.it-kom.de" 
-                                        value={config.nextcloudUrl || ''} 
-                                        onChange={e => saveConfig({ ...config, nextcloudUrl: e.target.value })} 
-                                        className="w-full p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
-                                    />
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="url" 
+                                            placeholder="https://nextcloud.it-kom.de" 
+                                            value={config.nextcloudUrl || ''} 
+                                            onChange={e => saveConfig({ ...config, nextcloudUrl: e.target.value })} 
+                                            className="flex-1 p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
+                                        />
+                                        <button 
+                                            onClick={async () => {
+                                                try {
+                                                    const url = (config.nextcloudUrl || '').replace(/\/index\.php\/?$/, '').replace(/\/$/, '');
+                                                    const response = await fetch(`${url}/status.php`);
+                                                    if (response.ok) {
+                                                        const data = await response.json();
+                                                        alert(`Verbindung erfolgreich!\nNextcloud Version: ${data.versionstring}`);
+                                                    } else {
+                                                        throw new Error();
+                                                    }
+                                                } catch (e) {
+                                                    alert("Verbindung fehlgeschlagen. Bitte URL prüfen.");
+                                                }
+                                            }}
+                                            className="px-4 bg-blue-500 text-white rounded-xl text-[10px] font-bold hover:bg-blue-600 transition-all"
+                                        >
+                                            TEST
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
