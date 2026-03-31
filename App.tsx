@@ -421,19 +421,37 @@ export default function App() {
         .replace(/\/index\.php\/?$/, '')
         .replace(/\/$/, '');
       
-      // Nextcloud WebDAV endpoint for this specific user
-      const webdavUrl = `${baseUrl}/remote.php/dav/files/${normalizedCode}/`;
+      // Try two common Nextcloud WebDAV paths
+      const pathsToTry = [
+        `${baseUrl}/remote.php/dav/files/${encodeURIComponent(normalizedCode)}/`,
+        `${baseUrl}/remote.php/webdav/`
+      ];
       
-      const client = createClient(webdavUrl, {
-        username: normalizedCode,
-        password: normalizedPassword
-      });
+      let success = false;
+      let lastError = null;
+      let finalWebdavUrl = '';
 
-      // Test connection by checking if root exists
-      await client.exists("/");
+      for (const webdavUrl of pathsToTry) {
+        try {
+          const client = createClient(webdavUrl, {
+            username: normalizedCode,
+            password: normalizedPassword
+          });
+
+          // Test connection by checking if root exists
+          await client.exists("/");
+          success = true;
+          finalWebdavUrl = webdavUrl;
+          break;
+        } catch (e) {
+          lastError = e;
+        }
+      }
+
+      if (!success) throw lastError;
       
       // Success!
-      setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl });
+      setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl: finalWebdavUrl });
       
       const tech: Technician = {
         id: normalizedCode,
@@ -448,7 +466,17 @@ export default function App() {
     } catch (err: any) {
       console.error("Nextcloud Login failed:", err);
       setStatus({ step: 'login' });
-      alert("Anmeldung fehlgeschlagen. Bitte prüfen Sie:\n1. Ist die Nextcloud-URL korrekt?\n2. Ist der Benutzername korrekt?\n3. Haben Sie ein gültiges App-Passwort verwendet?");
+      
+      let errorMsg = "Anmeldung fehlgeschlagen.";
+      if (err.message?.includes('401')) {
+        errorMsg += "\n\nFehler 401: Benutzername oder App-Passwort falsch.";
+      } else if (err.message?.includes('404')) {
+        errorMsg += "\n\nFehler 404: WebDAV-Pfad nicht gefunden. Bitte prüfen Sie die Nextcloud-URL.";
+      } else if (err.name === 'TypeError' || err.message?.includes('Failed to fetch')) {
+        errorMsg += "\n\nNetzwerkfehler: Die Nextcloud blockiert eventuell den Zugriff von dieser App (CORS).";
+      }
+      
+      alert(`${errorMsg}\n\nBitte prüfen Sie:\n1. Ist der Benutzername korrekt?\n2. Haben Sie ein GÜLTIGES App-Passwort (nicht das normale Passwort)?\n3. Ist die URL korrekt hinterlegt?`);
     }
   };
 
