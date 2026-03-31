@@ -416,22 +416,28 @@ export default function App() {
     setUploadMessage("Verbinde mit Nextcloud...");
     
     try {
-      // Clean URL: Remove index.php and trailing slashes
+      // Robust URL Cleaning: Extract only the domain part
       let baseUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de')
-        .replace(/\/index\.php\/?$/, '')
+        .split('/index.php')[0]
+        .split('/apps/')[0]
         .replace(/\/$/, '');
       
       // Handle Federated Cloud IDs (e.g. user@server.com -> user)
       let effectiveUsername = normalizedCode;
-      if (normalizedCode.includes('@') && normalizedCode.includes('.nextcloud-ionos.com')) {
-          effectiveUsername = normalizedCode.split('@')[0];
+      if (normalizedCode.includes('@')) {
+          // If it contains the domain, it's likely a Federated ID
+          if (normalizedCode.includes(baseUrl.replace(/^https?:\/\//, ''))) {
+              effectiveUsername = normalizedCode.split('@')[0];
+          }
       }
 
-      // Try common Nextcloud WebDAV paths
+      // Try all common Nextcloud WebDAV paths in order of probability
       const pathsToTry = [
         `${baseUrl}/remote.php/dav/files/${encodeURIComponent(effectiveUsername)}/`,
+        `${baseUrl}/remote.php/dav/files/${encodeURIComponent(normalizedCode)}/`,
         `${baseUrl}/remote.php/webdav/`,
-        `${baseUrl}/remote.php/dav/`
+        `${baseUrl}/remote.php/dav/`,
+        `${baseUrl}/public.php/webdav/`
       ];
       
       let success = false;
@@ -446,16 +452,27 @@ export default function App() {
             finalWebdavUrl = webdavUrl;
             break;
           }
+          
+          // Also try with full code if split failed
+          if (effectiveUsername !== normalizedCode) {
+            const existsFull = await nextcloudProxy.exists(webdavUrl, { user: normalizedCode, pass: normalizedPassword });
+            if (existsFull) {
+              success = true;
+              effectiveUsername = normalizedCode;
+              finalWebdavUrl = webdavUrl;
+              break;
+            }
+          }
         } catch (e: any) {
           if (e.message === "AUTH_FAILED") {
             isAuthError = true;
-            break;
+            // Don't break yet, maybe another path works with these credentials
           }
         }
       }
 
-      if (isAuthError) throw new Error("401: Benutzername oder App-Passwort falsch.");
-      if (!success) throw new Error("404: Verbindung zur Nextcloud fehlgeschlagen.");
+      if (isAuthError && !success) throw new Error("401: Benutzername oder App-Passwort falsch.");
+      if (!success) throw new Error("404: WebDAV-Pfad nicht gefunden. Bitte prüfen Sie die Nextcloud-URL.");
       
       // Success!
       setNextcloudCreds({ user: effectiveUsername, pass: normalizedPassword, webdavUrl: finalWebdavUrl });
