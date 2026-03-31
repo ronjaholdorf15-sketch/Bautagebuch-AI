@@ -421,9 +421,15 @@ export default function App() {
         .replace(/\/index\.php\/?$/, '')
         .replace(/\/$/, '');
       
+      // Handle Federated Cloud IDs (e.g. user@server.com -> user)
+      let effectiveUsername = normalizedCode;
+      if (normalizedCode.includes('@') && normalizedCode.includes('.nextcloud-ionos.com')) {
+          effectiveUsername = normalizedCode.split('@')[0];
+      }
+
       // Try common Nextcloud WebDAV paths
       const pathsToTry = [
-        `${baseUrl}/remote.php/dav/files/${encodeURIComponent(normalizedCode)}/`,
+        `${baseUrl}/remote.php/dav/files/${encodeURIComponent(effectiveUsername)}/`,
         `${baseUrl}/remote.php/webdav/`,
         `${baseUrl}/remote.php/dav/`
       ];
@@ -434,7 +440,7 @@ export default function App() {
 
       for (const webdavUrl of pathsToTry) {
         try {
-          const exists = await nextcloudProxy.exists(webdavUrl, { user: normalizedCode, pass: normalizedPassword });
+          const exists = await nextcloudProxy.exists(webdavUrl, { user: effectiveUsername, pass: normalizedPassword });
           if (exists) {
             success = true;
             finalWebdavUrl = webdavUrl;
@@ -452,14 +458,14 @@ export default function App() {
       if (!success) throw new Error("404: Verbindung zur Nextcloud fehlgeschlagen.");
       
       // Success!
-      setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl: finalWebdavUrl });
+      setNextcloudCreds({ user: effectiveUsername, pass: normalizedPassword, webdavUrl: finalWebdavUrl });
       
       const tech: Technician = {
-        id: normalizedCode,
-        name: normalizedCode,
-        code: normalizedCode.toUpperCase().substring(0, 3),
+        id: effectiveUsername,
+        name: effectiveUsername,
+        code: effectiveUsername.toUpperCase().substring(0, 3).replace(/[^A-Z]/g, 'X'),
         role: 'user',
-        nextcloudUser: normalizedCode,
+        nextcloudUser: effectiveUsername,
         nextcloudPass: normalizedPassword
       };
 
