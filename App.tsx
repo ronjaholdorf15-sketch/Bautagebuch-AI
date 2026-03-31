@@ -416,7 +416,28 @@ export default function App() {
     setUploadMessage("Verbinde mit Nextcloud...");
     
     try {
-      // Robust URL Cleaning
+      // 1. Check for manual override
+      if (config.manualWebdavUrl) {
+          const exists = await nextcloudProxy.exists(config.manualWebdavUrl, { user: normalizedCode, pass: normalizedPassword });
+          if (exists) {
+              setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl: config.manualWebdavUrl });
+              const tech: Technician = {
+                  id: normalizedCode,
+                  name: normalizedCode,
+                  code: normalizedCode.toUpperCase().substring(0, 3).replace(/[^A-Z]/g, 'X'),
+                  role: 'user',
+                  nextcloudUser: normalizedCode,
+                  nextcloudPass: normalizedPassword
+              };
+              await performFirebaseLogin(tech);
+              return;
+          } else {
+              // If manual fails, we might want to try discovery anyway or show 401
+              console.warn("Manual WebDAV URL failed, falling back to discovery");
+          }
+      }
+
+      // 2. Robust URL Cleaning
       const rawUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de');
       let baseUrl = rawUrl.split('/index.php')[0].split('/apps/')[0].replace(/\/$/, '');
       
@@ -1537,11 +1558,22 @@ export default function App() {
                                                     alert("Verbindung fehlgeschlagen. Bitte URL prüfen.");
                                                 }
                                             }}
-                                            className="px-4 bg-blue-500 text-white rounded-xl text-[10px] font-bold hover:bg-blue-600 transition-all"
+                                            className="bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-blue-700 transition-colors"
                                         >
-                                            TEST
+                                            Test
                                         </button>
                                     </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Manueller WebDAV-Pfad (Optional)</label>
+                                    <input 
+                                        type="url" 
+                                        placeholder="https://.../remote.php/dav/files/user/" 
+                                        value={config.manualWebdavUrl || ''} 
+                                        onChange={e => saveConfig({ ...config, manualWebdavUrl: e.target.value })} 
+                                        className="w-full p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
+                                    />
+                                    <p className="text-[9px] text-blue-400 ml-1">Nur nötig, wenn der automatische Login fehlschlägt. Kopieren Sie den Link aus den Nextcloud-Einstellungen (unten links bei Dateien).</p>
                                 </div>
                             </div>
                         </div>

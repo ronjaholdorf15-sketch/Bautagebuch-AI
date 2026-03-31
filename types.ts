@@ -21,6 +21,7 @@ export interface AppConfig {
   projects: PublicProject[];
   logo?: string; // Base64 encoded custom logo
   nextcloudUrl?: string; // Base URL of the Nextcloud instance
+  manualWebdavUrl?: string; // Manual override for WebDAV URL
 }
 
 export interface MaterialItem {
