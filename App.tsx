@@ -427,15 +427,19 @@ export default function App() {
           // Try variations for the current user based on the manual template
           const manualVariations = [
               config.manualWebdavUrl, // 1. Exactly as entered
+              config.manualWebdavUrl.endsWith('/') ? config.manualWebdavUrl : config.manualWebdavUrl + '/', // Ensure trailing slash
               `${basePath}${encodeURIComponent(normalizedCode)}/`, // 2. Base + Current User
               `${basePath}${encodeURIComponent(normalizedCode.replace(/\s+/g, ''))}/`, // 3. Base + User (no spaces)
-              `${basePath}${encodeURIComponent(normalizedCode.split('@')[0])}/` // 4. Base + Email-Prefix
+              `${basePath}${encodeURIComponent(normalizedCode.replace(/\s+/g, '%20'))}/`, // 4. Base + User (manual spaces)
+              `${basePath}${encodeURIComponent(normalizedCode.split('@')[0])}/` // 5. Base + Email-Prefix
           ];
 
           // Filter duplicates and empty strings
           const uniqueManualUrls = [...new Set(manualVariations)].filter(u => u && u.startsWith('http'));
+          let lastTriedManualUrl = "";
 
           for (const testUrl of uniqueManualUrls) {
+              lastTriedManualUrl = testUrl;
               try {
                   const exists = await nextcloudProxy.exists(testUrl, { user: normalizedCode, pass: normalizedPassword });
                   if (exists) {
@@ -458,9 +462,7 @@ export default function App() {
           }
           
           // If we are here, manual path variations failed
-          if (hasFilesPart) {
-              throw new Error(`404: WebDAV-Pfad nicht gefunden.\nDie Vorlage wurde geprüft, aber kein gültiger Ordner für "${normalizedCode}" gefunden.`);
-          }
+          throw new Error(`404: WebDAV-Pfad nicht gefunden.\nLetzter Versuch: ${lastTriedManualUrl}\n\nBitte prüfen Sie den Benutzernamen in Nextcloud unter "Einstellungen > Mobil & Desktop".`);
       }
 
       // 2. Fallback to Robust URL Discovery (if no manual path or manual failed)
@@ -472,6 +474,7 @@ export default function App() {
         normalizedCode,
         normalizedCode.split('@')[0], // Ronja Holdorf
         normalizedCode.split('@')[0].replace(/\s+/g, ''), // RonjaHoldorf
+        normalizedCode.replace(/\s+/g, '%20'), // Manual space encoding
         'ronja.holdorf15@gmail.com', // User's email (common in IONOS)
         'ronja.holdorf15' // Email prefix
       ];
