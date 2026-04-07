@@ -1897,7 +1897,8 @@ export default function App() {
                                                                 headers: { 'Content-Type': 'application/json' },
                                                                 body: JSON.stringify({ url, method: 'OPTIONS', username: user, password: pass })
                                                             });
-                                                            log += `(OPTIONS: ${optRes.status}) `;
+                                                            const optText = await optRes.text();
+                                                            log += `(OPTIONS: ${optRes.status} ${optText.substring(0, 20)}) `;
 
                                                             let res = await fetch('/api/nextcloud/proxy', {
                                                                 method: 'POST',
@@ -1913,7 +1914,7 @@ export default function App() {
                                                             });
                                                             
                                                             if (res.status === 405) {
-                                                                log += `(405 -> Versuche GET) `;
+                                                                log += `(PROPFIND 405 -> Versuche GET) `;
                                                                 res = await fetch('/api/nextcloud/proxy', {
                                                                     method: 'POST',
                                                                     headers: { 'Content-Type': 'application/json' },
@@ -1921,9 +1922,10 @@ export default function App() {
                                                                 });
                                                             }
                                                             
-                                                            log += `Status: ${res.status}\n`;
+                                                            const resText = await res.text();
+                                                            log += `Status: ${res.status} (${resText.substring(0, 30)})\n`;
                                                             
-                                                            if (res.status === 207 || res.status === 401 || (res.status === 200 && url.includes('remote.php'))) {
+                                                            if (res.status === 207 || res.status === 401 || (res.status === 200 && (url.includes('remote.php') || resText.includes('Nextcloud')))) {
                                                                 found = true;
                                                                 if (res.status === 401) {
                                                                     alert(`Pfad gefunden, aber Authentifizierung fehlgeschlagen (401).\nBitte prüfen Sie Ihr Passwort.\nPfad: ${url}`);

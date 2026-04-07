@@ -46,11 +46,17 @@ app.post('/api/nextcloud/proxy', async (req, res) => {
       res.setHeader('Content-Type', response.headers['content-type']);
     }
     
+    // If it's an error, log the first bit of the body
+    if (response.status >= 400) {
+      const bodyPreview = Buffer.from(response.data).toString('utf8').substring(0, 200);
+      console.log(`Proxy Error [${response.status}] for ${url}: ${bodyPreview}`);
+    }
+
     res.status(response.status).send(response.data);
   } catch (error: any) {
-    console.error('Nextcloud Proxy Error:', error.response?.status, error.message);
     const status = error.response?.status || 500;
-    const errorData = error.response?.data || error.message;
+    const errorData = error.response?.data ? Buffer.from(error.response.data).toString('utf8') : error.message;
+    console.error('Nextcloud Proxy Fatal Error:', status, errorData);
     res.status(status).send(errorData);
   }
 });
