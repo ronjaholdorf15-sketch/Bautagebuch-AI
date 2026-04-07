@@ -517,55 +517,45 @@ export default function App() {
   };
 
   const discoverWebdavUrl = async (user: string, pass: string): Promise<string> => {
-    // 1. Check for manual override
-    if (config.manualWebdavUrl) {
-        const hasFilesPart = config.manualWebdavUrl.includes('/files/');
-        const basePath = hasFilesPart ? config.manualWebdavUrl.split('/files/')[0] + '/files/' : config.manualWebdavUrl;
-        
-        const manualVariations = [
-            config.manualWebdavUrl,
-            config.manualWebdavUrl.endsWith('/') ? config.manualWebdavUrl : config.manualWebdavUrl + '/',
-            config.manualWebdavUrl.replace(/\/$/, ''),
-            config.webdavUsername ? `${basePath}${encodeURIComponent(config.webdavUsername)}/` : '',
-            `${basePath}${encodeURIComponent(user)}/`,
-            `${basePath}${encodeURIComponent(user.toLowerCase())}/`,
-            `${basePath}${encodeURIComponent(user.replace(/\s+/g, ''))}/`,
-            `${basePath}${encodeURIComponent(user.split('@')[0])}/`
-        ];
-
-        const uniqueManualUrls = [...new Set(manualVariations)].filter(u => u && u.startsWith('http'));
-        let lastTried = "";
-
-        for (const testUrl of uniqueManualUrls) {
-            lastTried = testUrl;
-            try {
-                const exists = await nextcloudProxy.exists(testUrl, { user, pass });
-                if (exists) return testUrl;
-            } catch (e: any) {
-                if (e.message === "AUTH_FAILED") throw new Error("AUTH_FAILED");
-            }
-        }
-        throw new Error(`404: WebDAV-Pfad nicht gefunden.\nLetzter Versuch: ${lastTried}`);
-    }
-
-    // 2. Fallback to Robust URL Discovery
+    // 1. Use the configured base URL
     const rawUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de').trim();
     let baseUrl = rawUrl;
     if (rawUrl.includes('/remote.php')) baseUrl = rawUrl.split('/remote.php')[0];
     else if (rawUrl.includes('/index.php')) baseUrl = rawUrl.split('/index.php')[0];
     baseUrl = baseUrl.replace(/\/$/, '');
     
+    // 2. If a manual template exists, use it as a pattern
+    if (config.manualWebdavUrl) {
+        const hasFilesPart = config.manualWebdavUrl.includes('/files/');
+        const basePath = hasFilesPart ? config.manualWebdavUrl.split('/files/')[0] + '/files/' : config.manualWebdavUrl;
+        
+        // Try variations based on the manual template
+        const manualVariations = [
+            `${basePath}${encodeURIComponent(user)}/`,
+            `${basePath}${encodeURIComponent(user.toLowerCase())}/`,
+            `${basePath}${encodeURIComponent(user.replace(/\s+/g, ''))}/`,
+            config.manualWebdavUrl // Also try the exact saved URL
+        ];
+
+        for (const testUrl of manualVariations) {
+            try {
+                const exists = await nextcloudProxy.exists(testUrl, { user, pass });
+                if (exists) return testUrl;
+            } catch (e: any) {}
+        }
+    }
+
+    // 3. Fallback to standard Nextcloud paths
     const baseUrlVariations = [baseUrl, baseUrl.includes('/nextcloud') ? baseUrl : `${baseUrl}/nextcloud`];
-    const userInputs = [config.webdavUsername, user, user.toLowerCase(), user.split('@')[0], user.replace(/\s+/g, '')].filter(Boolean) as string[];
-    const uniqueUsers = Array.from(new Set(userInputs));
-    const basePaths = ['/remote.php/dav/files/', '/remote.php/webdav/', '/index.php/remote.php/dav/files/', '/remote.php/dav/'];
+    const userInputs = [user, user.toLowerCase(), user.replace(/\s+/g, '')].filter(Boolean) as string[];
+    const basePaths = ['/remote.php/dav/files/', '/remote.php/webdav/', '/index.php/remote.php/dav/files/'];
     
     let triedUrls: string[] = [];
     let isAuthError = false;
 
     for (const base of baseUrlVariations) {
         for (const basePath of basePaths) {
-            for (const u of uniqueUsers) {
+            for (const u of userInputs) {
                 const testUrl = `${base}${basePath}${encodeURIComponent(u)}/`;
                 triedUrls.push(testUrl);
                 try {
@@ -578,7 +568,7 @@ export default function App() {
         }
     }
     
-    if (isAuthError) throw new Error("401: Authentifizierung fehlgeschlagen.");
+    if (isAuthError) throw new Error("401: Authentifizierung fehlgeschlagen. Bitte prüfen Sie Ihr App-Passwort.");
     const debugInfo = `DEBUG_INFO_START\nVersuchte Pfade:\n${triedUrls.join('\n')}\nDEBUG_INFO_END`;
     throw new Error(`404: WebDAV-Pfad konnte nicht automatisch ermittelt werden.\n\n${debugInfo}`);
   };
@@ -1215,6 +1205,12 @@ export default function App() {
                   <div className="text-center mb-10">
                     <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Anmelden</h2>
                     <p className="text-sm text-slate-400 font-medium mt-2">Willkommen zurück im Bautagebuch</p>
+                    {config.nextcloudUrl && (
+                        <div className="mt-4 flex items-center justify-center gap-1.5 bg-green-50 px-3 py-1.5 rounded-full border border-green-100 w-fit mx-auto">
+                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                            <span className="text-[10px] font-black text-green-600 uppercase tracking-widest">Server Bereit</span>
+                        </div>
+                    )}
                   </div>
                   <form onSubmit={handleLogin} className="space-y-6">
                       {status.step === 'error' && (
@@ -1721,7 +1717,7 @@ export default function App() {
                             <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-3">
                                 <p className="text-[11px] text-blue-700 leading-relaxed">Geben Sie die Basis-URL Ihrer Nextcloud-Instanz an.</p>
                                 <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Nextcloud Server URL</label>
+                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Nextcloud Server-Adresse (Basis)</label>
                                     <div className="flex gap-2">
                                         <input 
                                             type="url" 
@@ -1843,7 +1839,7 @@ export default function App() {
                                         onChange={e => saveConfig({ ...config, webdavUsername: e.target.value })} 
                                         className="w-full p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
                                     />
-                                    <p className="text-[9px] text-blue-400 ml-1">Nur nötig, wenn der WebDAV-Name von Ihrem Login-Namen abweicht.</p>
+                                    <p className="text-[9px] text-blue-400 ml-1">Die Basis-URL Ihres Nextcloud-Servers (wird für alle Benutzer verwendet).</p>
                                 </div>
 
                                 <div className="space-y-1">
