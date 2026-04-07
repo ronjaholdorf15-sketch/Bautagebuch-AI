@@ -43,8 +43,10 @@ export interface DiaryEntry {
 }
 
 export interface FormStatus {
-  step: 'login' | 'form' | 'uploading' | 'success';
+  step: 'login' | 'form' | 'uploading' | 'success' | 'error';
   message?: string;
+  error?: string;
+  details?: any;
 }
 
 export enum WeatherCondition {

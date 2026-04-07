@@ -466,14 +466,30 @@ export default function App() {
       }
 
       // 2. Fallback to Robust URL Discovery (if no manual path or manual failed)
-      const rawUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de');
-      let baseUrl = rawUrl.split('/index.php')[0].split('/apps/')[0].replace(/\/$/, '');
+      const rawUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de').trim();
       
+      // Smart Base URL extraction: Handle cases where user pastes the full WebDAV URL
+      let baseUrl = rawUrl;
+      if (rawUrl.includes('/remote.php')) {
+          baseUrl = rawUrl.split('/remote.php')[0];
+      } else if (rawUrl.includes('/index.php')) {
+          baseUrl = rawUrl.split('/index.php')[0];
+      }
+      baseUrl = baseUrl.replace(/\/$/, '');
+      
+      // Base URL variations (some IONOS setups need /nextcloud, some don't)
+      const baseUrlVariations = [
+        baseUrl,
+        baseUrl.includes('/nextcloud') ? baseUrl : `${baseUrl}/nextcloud`
+      ];
+
       // Username variations
       const userInputs = [
         normalizedCode,
         normalizedCode.split('@')[0], // Extract name if email was entered
         normalizedCode.replace(/\s+/g, ''), // Name without spaces
+        normalizedCode.replace(/\s+/g, '.').toLowerCase(), // ronja.holdorf
+        normalizedCode.replace(/\s+/g, '_'), // Name with underscores
         'ronja.holdorf15@gmail.com',
         'ronja.holdorf15'
       ];
@@ -483,13 +499,11 @@ export default function App() {
       // Path variations
       const basePaths = [
         '/remote.php/dav/files/',
+        '/remote.php/webdav/', // Generic WebDAV endpoint
         '/index.php/remote.php/dav/files/',
-        '/remote.php/webdav/',
         '/index.php/remote.php/webdav/',
         '/remote.php/dav/',
         '/index.php/remote.php/dav/',
-        '/nextcloud/remote.php/dav/files/',
-        '/nextcloud/index.php/remote.php/dav/files/'
       ];
       
       let success = false;
@@ -498,34 +512,59 @@ export default function App() {
       let isAuthError = false;
       let triedUrls: string[] = [];
 
-      // Systematic discovery
-      discoveryLoop:
-      for (const basePath of basePaths) {
-        for (const user of uniqueUsers) {
-          const isGenericPath = basePath.endsWith('/webdav/') || basePath.endsWith('/dav/');
-          
-          // CRITICAL: We use encodeURIComponent only on the user part to handle spaces correctly
-          const webdavUrl = isGenericPath 
-            ? `${baseUrl}${basePath}`
-            : `${baseUrl}${basePath}${encodeURIComponent(user)}/`;
-          
-          triedUrls.push(webdavUrl);
-          if (triedUrls.length > 20) triedUrls.shift();
-
+      // If the user provided a full WebDAV URL, try it first
+      if (rawUrl.includes('/remote.php/dav/files/') || rawUrl.includes('/remote.php/webdav/')) {
+          triedUrls.push(rawUrl);
           try {
-            // We try the login with the current user variation
-            const exists = await nextcloudProxy.exists(webdavUrl, { user, pass: normalizedPassword });
-            if (exists) {
-              success = true;
-              effectiveUsername = user;
-              finalWebdavUrl = webdavUrl;
-              break discoveryLoop;
-            }
+              const exists = await nextcloudProxy.exists(rawUrl, { user: normalizedCode, pass: normalizedPassword });
+              if (exists) {
+                  success = true;
+                  effectiveUsername = normalizedCode;
+                  finalWebdavUrl = rawUrl;
+              }
           } catch (e: any) {
-            if (e.message === "AUTH_FAILED") {
-              isAuthError = true;
-              // Keep track of which user caused the auth error to help debugging
-              if (!isGenericPath) effectiveUsername = user;
+              if (e.message === "AUTH_FAILED") isAuthError = true;
+          }
+      }
+
+      // Systematic discovery if not already successful
+      if (!success) {
+        discoveryLoop:
+        for (const base of baseUrlVariations) {
+          for (const basePath of basePaths) {
+            for (const user of uniqueUsers) {
+              const isGenericPath = basePath.endsWith('/webdav/') || basePath.endsWith('/dav/');
+              
+              // Try both encodeURIComponent and raw (some servers are picky)
+              const userVariants = [encodeURIComponent(user), user];
+              
+              for (const userPart of userVariants) {
+                const webdavUrl = isGenericPath 
+                  ? `${base}${basePath}`
+                  : `${base}${basePath}${userPart}/`;
+                
+                if (triedUrls.includes(webdavUrl)) continue;
+                triedUrls.push(webdavUrl);
+                if (triedUrls.length > 50) triedUrls.shift();
+
+                try {
+                  const authUsers = [user, normalizedCode];
+                  for (const authUser of authUsers) {
+                    const exists = await nextcloudProxy.exists(webdavUrl, { user: authUser, pass: normalizedPassword });
+                    if (exists) {
+                      success = true;
+                      effectiveUsername = authUser;
+                      finalWebdavUrl = webdavUrl;
+                      break discoveryLoop;
+                    }
+                  }
+                } catch (e: any) {
+                  if (e.message === "AUTH_FAILED") {
+                    isAuthError = true;
+                    if (!isGenericPath) effectiveUsername = user;
+                  }
+                }
+              }
             }
           }
         }
@@ -536,7 +575,8 @@ export default function App() {
       }
       
       if (!success) {
-          throw new Error(`404: WebDAV-Pfad nicht gefunden.\n\nProbiert wurden unter anderem:\n${triedUrls.slice(-3).join('\n')}`);
+          const debugInfo = `Tried URLs:\n${triedUrls.join('\n')}`;
+          throw new Error(`404: WebDAV-Pfad nicht gefunden.\n\nBitte prüfen Sie die Federated Cloud ID oder kopieren Sie den WebDAV-Link aus den Nextcloud-Einstellungen.\n\nDEBUG_INFO_START\n${debugInfo}\nDEBUG_INFO_END`);
       }
       
       // Success!
@@ -554,21 +594,29 @@ export default function App() {
       await performFirebaseLogin(tech);
     } catch (err: any) {
       console.error("Nextcloud Login failed:", err);
-      setStatus({ step: 'login' });
       
       let errorMsg = "Anmeldung fehlgeschlagen.";
-      if (err.message?.includes('401')) {
-        errorMsg = "Fehler 401: Benutzername oder App-Passwort falsch.";
-      } else if (err.message?.includes('404')) {
-        errorMsg = "Fehler 404: WebDAV-Pfad nicht gefunden.";
+      let debugInfo = "";
+      
+      if (err.message?.includes('DEBUG_INFO_START')) {
+          const parts = err.message.split('DEBUG_INFO_START');
+          errorMsg = parts[0].trim();
+          debugInfo = parts[1].split('DEBUG_INFO_END')[0].trim();
       } else {
-        errorMsg = "Verbindung zur Nextcloud nicht möglich.";
+          errorMsg = err.message || "Anmeldung fehlgeschlagen.";
       }
-      
-      // Show the actual error message details (including last tried URL)
-      const detailedInfo = err.message || "Unbekannter Fehler";
-      
-      alert(`${errorMsg}\n\nDetails:\n${detailedInfo}\n\nBitte prüfen Sie:\n1. Ist der Benutzername korrekt?\n2. Haben Sie ein GÜLTIGES App-Passwort?\n3. Ist die URL in den Einstellungen korrekt?`);
+
+      if (errorMsg.includes('401')) {
+          errorMsg = "Fehler 401: Benutzername oder App-Passwort falsch. Bitte prüfen Sie Ihre Eingaben.";
+      } else if (errorMsg.includes('404')) {
+          errorMsg = "Fehler 404: WebDAV-Pfad nicht gefunden.";
+      }
+
+      setStatus({ 
+        step: 'error', 
+        error: errorMsg,
+        details: debugInfo ? debugInfo : undefined
+      });
     }
   };
 
@@ -1118,6 +1166,34 @@ export default function App() {
                     <p className="text-sm text-slate-400 font-medium mt-2">Willkommen zurück im Bautagebuch</p>
                   </div>
                   <form onSubmit={handleLogin} className="space-y-6">
+                      {status.step === 'error' && (
+                        <div className="p-4 bg-red-50 border border-red-100 rounded-2xl animate-shake">
+                            <p className="text-xs text-red-600 font-bold leading-relaxed">{status.error}</p>
+                            {status.details && (
+                                <div className="mt-3 pt-3 border-t border-red-100">
+                                    <Button 
+                                        type="button"
+                                        variant="outline" 
+                                        className="w-full text-[10px] py-2 h-auto border-red-200 text-red-700 hover:bg-red-100" 
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(status.details);
+                                            alert("Debug-Info in Zwischenablage kopiert!");
+                                        }}
+                                    >
+                                        Debug-Info kopieren
+                                    </Button>
+                                    <p className="text-[9px] text-red-400 mt-2 text-center">Senden Sie diese Info an den Support.</p>
+                                </div>
+                            )}
+                            <button 
+                                type="button"
+                                onClick={() => setStatus({ step: 'login' })}
+                                className="w-full text-[10px] text-red-400 font-bold uppercase tracking-widest mt-2 hover:text-red-600 transition-colors"
+                            >
+                                Schließen
+                            </button>
+                        </div>
+                      )}
                       <div className="space-y-2">
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Nextcloud Benutzername</label>
                         <input 
@@ -1761,12 +1837,13 @@ export default function App() {
               <section className="space-y-3">
                 <div className="flex items-center gap-3">
                   <span className="w-8 h-8 bg-brand-primary text-white rounded-full flex items-center justify-center font-black text-sm">2</span>
-                  <h4 className="font-bold text-slate-800">WebDAV-Link finden</h4>
+                  <h4 className="font-bold text-slate-800">WebDAV-Link finden (Wichtig für IONOS)</h4>
                 </div>
                 <p className="text-sm text-slate-600 leading-relaxed ml-11">
-                  Klicken Sie in Nextcloud links auf <span className="font-bold">Dateien</span>, dann ganz unten links auf das <span className="font-bold">Zahnrad (Einstellungen)</span>. 
-                  Kopieren Sie den Link unter "WebDAV". Er sieht oft so aus:<br/>
-                  <code className="text-[10px] bg-slate-100 p-1 block mt-2 rounded break-all">https://.../remote.php/dav/files/benutzer/</code>
+                  Gehen Sie in Nextcloud zu <span className="font-bold">Einstellungen &rarr; Mobil & Desktop</span>. 
+                  Kopieren Sie dort ganz unten den <span className="font-bold">WebDAV-Link</span>. 
+                  Fügen Sie diesen Link in der App unter <span className="italic">Einstellungen &rarr; Nextcloud Server URL</span> ein.
+                  <code className="text-[10px] bg-slate-100 p-1 block mt-2 rounded break-all">https://nc-123.nextcloud-ionos.com/remote.php/dav/files/user/</code>
                 </p>
               </section>
 
