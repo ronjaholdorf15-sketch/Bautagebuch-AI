@@ -414,6 +414,19 @@ export default function App() {
         return;
     }
 
+    // 0. Master Admin Override (Local fallback for initial setup)
+    if (normalizedCode === 'ADMIN' && normalizedPassword === 'admin123') {
+        const adminTech: Technician = {
+            id: 'admin-master',
+            name: 'Administrator',
+            code: 'ADMIN',
+            password: 'admin123',
+            role: 'admin'
+        };
+        await performFirebaseLogin(adminTech);
+        return;
+    }
+
     // 1. Check for stored technician (App Login)
     const storedTech = config.technicians.find(t => 
         t.code.toUpperCase() === normalizedCode.toUpperCase() || 
@@ -442,6 +455,12 @@ export default function App() {
             await performFirebaseLogin(storedTech);
             return;
         } catch (err: any) {
+            if (storedTech.role === 'admin') {
+                console.warn("Nextcloud connection failed for admin, allowing local login", err);
+                await performFirebaseLogin(storedTech);
+                alert("Hinweis: Nextcloud-Verbindung fehlgeschlagen. Sie wurden lokal angemeldet, um die Einstellungen zu prüfen.");
+                return;
+            }
             handleLoginError(err);
             return;
         }
