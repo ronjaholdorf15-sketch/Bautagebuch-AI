@@ -563,24 +563,36 @@ export default function App() {
         '/index.php/remote.php/dav/files/', 
         '/remote.php/dav/',
         '/dav/files/',
-        '/public.php/webdav/'
+        '/public.php/webdav/',
+        '/index.php/remote.php/dav/files/'
     ];
     
     let triedUrls: string[] = [];
     let isAuthError = false;
 
+    // 1. If baseUrl is already a full WebDAV URL, try it first
+    if (baseUrl.includes('/remote.php/')) {
+        triedUrls.push(baseUrl);
+        triedUrls.push(baseUrl.endsWith('/') ? baseUrl : baseUrl + '/');
+    }
+
     for (const base of baseUrlVariations) {
         for (const basePath of basePaths) {
             for (const u of uniqueUsers) {
                 const testUrl = `${base}${basePath}${encodeURIComponent(u)}/`;
-                triedUrls.push(testUrl);
-                try {
-                    const exists = await nextcloudProxy.exists(testUrl, { user, pass });
-                    if (exists) return testUrl;
-                } catch (e: any) {
-                    if (e.message === "AUTH_FAILED") isAuthError = true;
+                if (!triedUrls.includes(testUrl)) {
+                    triedUrls.push(testUrl);
                 }
             }
+        }
+    }
+
+    for (const testUrl of triedUrls) {
+        try {
+            const exists = await nextcloudProxy.exists(testUrl, { user, pass });
+            if (exists) return testUrl;
+        } catch (e: any) {
+            if (e.message === "AUTH_FAILED") isAuthError = true;
         }
     }
     
@@ -1806,42 +1818,78 @@ export default function App() {
                                                 try {
                                                     setStatus({ step: 'uploading' });
                                                     setUploadMessage('Teste Verbindung...');
-                                                    const cleanUrl = config.nextcloudUrl.replace(/\/$/, '');
+                                                    
+                                                    const cleanUrl = config.nextcloudUrl.trim().replace(/\/$/, '');
                                                     let variations: string[] = [];
                                                     
-                                                    if (config.manualWebdavUrl) {
-                                                        variations.push(config.manualWebdavUrl);
-                                                    } else {
-                                                        const bases = [cleanUrl, `${cleanUrl}/nextcloud`].filter(u => u);
-                                                        const paths = ['/remote.php/dav/files/', '/remote.php/webdav/', '/index.php/remote.php/dav/files/'];
-                                                        const users = [user, user.toLowerCase(), user.replace(/\s+/g, '')].filter(Boolean) as string[];
-                                                        
-                                                        for (const b of bases) {
-                                                            for (const p of paths) {
-                                                                for (const u of users) {
-                                                                    variations.push(`${b}${p}${encodeURIComponent(u)}/`);
-                                                                }
+                                                    // 1. If it's already a full WebDAV URL, try it first
+                                                    if (cleanUrl.includes('/remote.php/')) {
+                                                        variations.push(cleanUrl);
+                                                        variations.push(cleanUrl + '/');
+                                                    }
+                                                    
+                                                    // 2. Add standard variations
+                                                    const bases = [cleanUrl, `${cleanUrl}/nextcloud`].filter(u => u);
+                                                    const paths = [
+                                                        '/remote.php/dav/files/', 
+                                                        '/remote.php/webdav/', 
+                                                        '/index.php/remote.php/dav/files/',
+                                                        '/remote.php/dav/',
+                                                        '/dav/files/'
+                                                    ];
+                                                    const users = [
+                                                        user, 
+                                                        user.toLowerCase(), 
+                                                        user.replace(/\s+/g, ''),
+                                                        user.split('@')[0],
+                                                        user.replace(/\s+/g, '.').toLowerCase()
+                                                    ].filter((u): u is string => !!u);
+                                                    
+                                                    for (const b of bases) {
+                                                        for (const p of paths) {
+                                                            for (const u of users) {
+                                                                variations.push(`${b}${p}${encodeURIComponent(u)}/`);
                                                             }
                                                         }
                                                     }
                                                     
+                                                    // Deduplicate
+                                                    variations = Array.from(new Set(variations));
+                                                    
+                                                    let log = "Verbindungs-Test Protokoll:\n";
                                                     let found = false;
+                                                    
                                                     for (const url of variations) {
                                                         try {
                                                             const res = await fetch('/api/nextcloud/proxy', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({ url, method: 'PROPFIND', username: user, password: pass, headers: { 'Depth': '0' } })
+                                                                body: JSON.stringify({ 
+                                                                    url, 
+                                                                    method: 'PROPFIND', 
+                                                                    username: user, 
+                                                                    password: pass, 
+                                                                    headers: { 'Depth': '0' } 
+                                                                })
                                                             });
+                                                            
+                                                            log += `Prüfe: ${url} -> Status: ${res.status}\n`;
+                                                            
                                                             if (res.status === 207 || res.status === 401) {
                                                                 found = true;
                                                                 saveConfig({ ...config, manualWebdavUrl: url });
-                                                                alert(res.status === 401 ? "Server gefunden, aber Passwort falsch." : "ERFOLG! Server-Verbindung konfiguriert.");
+                                                                alert(res.status === 401 ? "Server gefunden, aber Passwort falsch (401)." : "ERFOLG! Server-Verbindung konfiguriert.");
                                                                 break;
                                                             }
-                                                        } catch (e) {}
+                                                        } catch (e) {
+                                                            log += `Fehler bei ${url}: ${e}\n`;
+                                                        }
                                                     }
-                                                    if (!found) alert("Verbindung fehlgeschlagen. Bitte prüfen Sie die Server-URL.");
+                                                    
+                                                    if (!found) {
+                                                        console.log(log);
+                                                        alert("Verbindung fehlgeschlagen. Bitte prüfen Sie die Server-URL. Details wurden in der Konsole geloggt.");
+                                                    }
                                                 } catch (err) {
                                                     alert("Fehler: " + err);
                                                 } finally {
