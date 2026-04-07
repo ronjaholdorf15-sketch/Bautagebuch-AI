@@ -1835,15 +1835,17 @@ export default function App() {
                                                         '/remote.php/webdav/', 
                                                         '/index.php/remote.php/dav/files/',
                                                         '/remote.php/dav/',
-                                                        '/dav/files/'
+                                                        '/dav/files/',
+                                                        '/remote.php/dav/files/'
                                                     ];
                                                     const users = [
                                                         user, 
                                                         user.toLowerCase(), 
                                                         user.replace(/\s+/g, ''),
                                                         user.split('@')[0],
-                                                        user.replace(/\s+/g, '.').toLowerCase()
-                                                    ].filter((u): u is string => !!u);
+                                                        user.replace(/\s+/g, '.').toLowerCase(),
+                                                        '' // Try without username in path
+                                                    ].filter((u): u is string => u !== null);
                                                     
                                                     for (const b of bases) {
                                                         for (const p of paths) {
@@ -1861,8 +1863,9 @@ export default function App() {
                                                     const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`;
                                                     
                                                     for (const url of variations) {
+                                                        log += `Prüfe: ${url} ... `;
                                                         try {
-                                                            const res = await fetch('/api/nextcloud/proxy', {
+                                                            let res = await fetch('/api/nextcloud/proxy', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
                                                                 body: JSON.stringify({ 
@@ -1870,30 +1873,41 @@ export default function App() {
                                                                     method: 'PROPFIND', 
                                                                     username: user, 
                                                                     password: pass, 
-                                                                    headers: { 
-                                                                        'Depth': '0',
-                                                                        'Content-Type': 'application/xml'
-                                                                    },
+                                                                    headers: { 'Depth': '0', 'Content-Type': 'application/xml' },
                                                                     data: propfindBody
                                                                 })
                                                             });
                                                             
-                                                            log += `Prüfe: ${url} -> Status: ${res.status}\n`;
+                                                            if (res.status === 405) {
+                                                                log += `(405 -> Versuche GET) `;
+                                                                res = await fetch('/api/nextcloud/proxy', {
+                                                                    method: 'POST',
+                                                                    headers: { 'Content-Type': 'application/json' },
+                                                                    body: JSON.stringify({ url, method: 'GET', username: user, password: pass })
+                                                                });
+                                                            }
                                                             
-                                                            if (res.status === 207 || res.status === 401) {
+                                                            log += `Status: ${res.status}\n`;
+                                                            
+                                                            if (res.status === 207 || res.status === 401 || (res.status === 200 && url.includes('remote.php'))) {
                                                                 found = true;
+                                                                if (res.status === 401) {
+                                                                    alert(`Pfad gefunden, aber Authentifizierung fehlgeschlagen (401).\nBitte prüfen Sie Ihr Passwort.\nPfad: ${url}`);
+                                                                } else {
+                                                                    alert(`ERFOLG! Verbindung hergestellt.\nPfad: ${url}`);
+                                                                }
                                                                 saveConfig({ ...config, manualWebdavUrl: url });
-                                                                alert(res.status === 401 ? "Server gefunden, aber Passwort falsch (401)." : "ERFOLG! Server-Verbindung konfiguriert.");
                                                                 break;
                                                             }
                                                         } catch (e) {
-                                                            log += `Fehler bei ${url}: ${e}\n`;
+                                                            log += `Fehler: ${e}\n`;
                                                         }
+                                                        if (found) break;
                                                     }
                                                     
                                                     if (!found) {
                                                         console.log(log);
-                                                        const copy = confirm("Verbindung fehlgeschlagen. Möchten Sie das detaillierte Fehler-Protokoll kopieren, um es dem Support zu schicken?");
+                                                        const copy = confirm("Verbindung fehlgeschlagen. Möchten Sie das detaillierte Fehler-Protokoll kopieren?");
                                                         if (copy) {
                                                             navigator.clipboard.writeText(log);
                                                             alert("Protokoll kopiert!");
