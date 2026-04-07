@@ -1808,6 +1808,20 @@ export default function App() {
                                         >
                                             URL-Assistent
                                         </button>
+                                    </div>
+                                    <p className="text-[9px] text-blue-400 ml-1">Die Basis-URL Ihres Nextcloud-Servers.</p>
+                                </div>
+
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Manueller WebDAV-Pfad (für Experten)</label>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="text" 
+                                            placeholder="Wird automatisch vom Assistenten ausgefüllt" 
+                                            value={config.manualWebdavUrl || ''} 
+                                            onChange={e => saveConfig({ ...config, manualWebdavUrl: e.target.value })} 
+                                            className="flex-1 p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
+                                        />
                                         <button 
                                             onClick={async () => {
                                                 if (!config.nextcloudUrl) return alert("Bitte URL eingeben");
@@ -1823,9 +1837,9 @@ export default function App() {
                                                     let variations: string[] = [];
                                                     
                                                     // 1. If it's already a full WebDAV URL, try it first
-                                                    if (cleanUrl.includes('/remote.php/')) {
-                                                        variations.push(cleanUrl);
-                                                        variations.push(cleanUrl + '/');
+                                                    if (config.manualWebdavUrl) {
+                                                        variations.push(config.manualWebdavUrl);
+                                                        if (!config.manualWebdavUrl.endsWith('/')) variations.push(config.manualWebdavUrl + '/');
                                                     }
                                                     
                                                     // 2. Add standard variations
@@ -1835,8 +1849,7 @@ export default function App() {
                                                         '/remote.php/webdav/', 
                                                         '/index.php/remote.php/dav/files/',
                                                         '/remote.php/dav/',
-                                                        '/dav/files/',
-                                                        '/remote.php/dav/files/'
+                                                        '/dav/files/'
                                                     ];
                                                     const users = [
                                                         user, 
@@ -1844,7 +1857,7 @@ export default function App() {
                                                         user.replace(/\s+/g, ''),
                                                         user.split('@')[0],
                                                         user.replace(/\s+/g, '.').toLowerCase(),
-                                                        '' // Try without username in path
+                                                        ''
                                                     ].filter((u): u is string => u !== null);
                                                     
                                                     for (const b of bases) {
@@ -1855,7 +1868,6 @@ export default function App() {
                                                         }
                                                     }
                                                     
-                                                    // Deduplicate
                                                     variations = Array.from(new Set(variations));
                                                     
                                                     let log = "Verbindungs-Test Protokoll:\n";
@@ -1872,9 +1884,6 @@ export default function App() {
                                                             body: JSON.stringify({ url: statusUrl, method: 'GET' })
                                                         });
                                                         log += `Status: ${sRes.status}\n`;
-                                                        if (sRes.status !== 200) {
-                                                            log += "WARNUNG: Server scheint unter dieser URL kein Nextcloud-Server zu sein oder ist nicht erreichbar.\n";
-                                                        }
                                                     } catch (e) {
                                                         log += `Fehler beim Status-Check: ${e}\n`;
                                                     }
@@ -1882,7 +1891,7 @@ export default function App() {
                                                     for (const url of variations) {
                                                         log += `Prüfe: ${url} ... `;
                                                         try {
-                                                            // Try OPTIONS first to see what's allowed
+                                                            // Try OPTIONS first
                                                             const optRes = await fetch('/api/nextcloud/proxy', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
@@ -1904,7 +1913,7 @@ export default function App() {
                                                             });
                                                             
                                                             if (res.status === 405) {
-                                                                log += `(PROPFIND 405 -> Versuche GET) `;
+                                                                log += `(405 -> Versuche GET) `;
                                                                 res = await fetch('/api/nextcloud/proxy', {
                                                                     method: 'POST',
                                                                     headers: { 'Content-Type': 'application/json' },
@@ -1949,7 +1958,7 @@ export default function App() {
                                             Testen
                                         </button>
                                     </div>
-                                    <p className="text-[9px] text-blue-400 ml-1">Die Basis-URL Ihres Nextcloud-Servers (wird für alle Benutzer verwendet).</p>
+                                    <p className="text-[9px] text-blue-400 ml-1">Hier wird der exakte WebDAV-Pfad gespeichert, den der Assistent ermittelt hat.</p>
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">WebDAV Benutzername (Optional)</label>
