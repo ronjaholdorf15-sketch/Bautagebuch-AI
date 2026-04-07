@@ -504,15 +504,15 @@ export default function App() {
     }
 
     if (errorMsg.includes('401')) {
-        errorMsg = "Fehler 401: Benutzername oder App-Passwort falsch. Bitte prüfen Sie Ihre Eingaben.";
+        errorMsg = "Fehler 401: Benutzername oder App-Passwort falsch. Bitte prüfen Sie Ihre Eingaben in Nextcloud (Einstellungen -> Sicherheit).";
     } else if (errorMsg.includes('404')) {
-        errorMsg = "Fehler 404: WebDAV-Pfad nicht gefunden.";
+        errorMsg = "Fehler 404: WebDAV-Pfad nicht gefunden. Bitte prüfen Sie die Server-URL in den Einstellungen.";
     }
 
     setStatus({ 
       step: 'error', 
       error: errorMsg,
-      details: debugInfo ? debugInfo : undefined
+      details: debugInfo ? `Versuchte Pfade:\n${debugInfo}` : undefined
     });
   };
 
@@ -546,16 +546,30 @@ export default function App() {
     }
 
     // 3. Fallback to standard Nextcloud paths
-    const baseUrlVariations = [baseUrl, baseUrl.includes('/nextcloud') ? baseUrl : `${baseUrl}/nextcloud`];
-    const userInputs = [user, user.toLowerCase(), user.replace(/\s+/g, '')].filter(Boolean) as string[];
-    const basePaths = ['/remote.php/dav/files/', '/remote.php/webdav/', '/index.php/remote.php/dav/files/'];
+    const baseUrlVariations = [baseUrl, baseUrl.includes('/nextcloud') ? baseUrl : `${baseUrl}/nextcloud`].filter(Boolean);
+    const userInputs = [
+        user, 
+        user.toLowerCase(), 
+        user.replace(/\s+/g, ''), 
+        user.split('@')[0],
+        user.replace(/\s+/g, '.').toLowerCase()
+    ].filter(Boolean) as string[];
+    const uniqueUsers = Array.from(new Set(userInputs));
+    const basePaths = [
+        '/remote.php/dav/files/', 
+        '/remote.php/webdav/', 
+        '/index.php/remote.php/dav/files/', 
+        '/remote.php/dav/',
+        '/dav/files/',
+        '/public.php/webdav/'
+    ];
     
     let triedUrls: string[] = [];
     let isAuthError = false;
 
     for (const base of baseUrlVariations) {
         for (const basePath of basePaths) {
-            for (const u of userInputs) {
+            for (const u of uniqueUsers) {
                 const testUrl = `${base}${basePath}${encodeURIComponent(u)}/`;
                 triedUrls.push(testUrl);
                 try {
@@ -568,8 +582,8 @@ export default function App() {
         }
     }
     
-    if (isAuthError) throw new Error("401: Authentifizierung fehlgeschlagen. Bitte prüfen Sie Ihr App-Passwort.");
-    const debugInfo = `DEBUG_INFO_START\nVersuchte Pfade:\n${triedUrls.join('\n')}\nDEBUG_INFO_END`;
+    if (isAuthError) throw new Error(`401: Authentifizierung fehlgeschlagen. Bitte prüfen Sie Ihr App-Passwort.\nDEBUG_INFO_START\n${triedUrls.join('\n')}\nDEBUG_INFO_END`);
+    const debugInfo = `DEBUG_INFO_START\n${triedUrls.join('\n')}\nDEBUG_INFO_END`;
     throw new Error(`404: WebDAV-Pfad konnte nicht automatisch ermittelt werden.\n\n${debugInfo}`);
   };
 
@@ -1297,9 +1311,19 @@ export default function App() {
                         Nutzen Sie Ihren Nextcloud-Benutzernamen und ein <br/>
                         <a href={`${(config.nextcloudUrl || 'https://nextcloud.it-kom.de').replace(/\/index\.php\/?$/, '')}/index.php/settings/user/security`} target="_blank" rel="noopener noreferrer" className="text-brand-primary underline font-bold">App-Passwort hier erstellen</a>
                       </p>
-                      <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <p className="text-[9px] text-slate-500 leading-tight">
-                          <span className="font-bold text-slate-700">Tipp:</span> Ihr WebDAV-Benutzername kann sich von Ihrer E-Mail unterscheiden. Sie finden ihn in Nextcloud unter <span className="italic">Einstellungen &rarr; Mobil & Desktop</span> ganz unten.
+                      
+                      <div className="mt-4 p-4 bg-blue-50 rounded-2xl border border-blue-100 space-y-3">
+                        <p className="text-[10px] text-blue-700 leading-relaxed">
+                          <span className="font-bold">So finden Sie Ihren Benutzernamen:</span>
+                        </p>
+                        <ul className="text-[9px] text-blue-600 space-y-1 list-disc ml-4">
+                          <li>Klicken Sie in Nextcloud unten links auf das <span className="font-bold">Zahnrad (Einstellungen)</span>.</li>
+                          <li>Dort steht ganz unten eine <span className="font-bold">WebDAV-Adresse</span>.</li>
+                          <li>Der Teil nach <span className="italic">.../files/</span> ist Ihr Benutzername.</li>
+                          <li>Oft ist es auch einfach Ihre <span className="font-bold">E-Mail-Adresse</span>.</li>
+                        </ul>
+                        <p className="text-[9px] text-blue-500 italic border-t border-blue-100 pt-2">
+                          Tipp: Bei IONOS ist es meistens Ihr voller Name (z.B. "Max Mustermann").
                         </p>
                       </div>
                   </form>
@@ -1727,6 +1751,33 @@ export default function App() {
                                             className="flex-1 p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
                                         />
                                         <button 
+                                            onClick={() => {
+                                                const fullUrl = prompt("Kopieren Sie die WebDAV-Adresse aus Nextcloud (unten links bei Dateien -> Einstellungen) hier hinein:");
+                                                if (!fullUrl) return;
+                                                
+                                                try {
+                                                    const url = new URL(fullUrl);
+                                                    const baseUrl = `${url.protocol}//${url.host}`;
+                                                    saveConfig({ ...config, nextcloudUrl: baseUrl, manualWebdavUrl: fullUrl });
+                                                    
+                                                    // Extract username from /files/USERNAME/
+                                                    const match = fullUrl.match(/\/files\/([^/]+)\/?/);
+                                                    if (match && match[1]) {
+                                                        const extractedUser = decodeURIComponent(match[1]);
+                                                        alert(`Erfolg! \nServer: ${baseUrl}\nBenutzername erkannt: ${extractedUser}\n\nBitte geben Sie jetzt noch Ihr App-Passwort beim Login ein.`);
+                                                    } else {
+                                                        alert(`Server erkannt: ${baseUrl}\nDer Benutzername konnte nicht automatisch aus dem Pfad gelesen werden, aber der Pfad wurde gespeichert.`);
+                                                    }
+                                                } catch (e) {
+                                                    alert("Ungültige URL. Bitte kopieren Sie die komplette Adresse.");
+                                                }
+                                            }}
+                                            className="bg-blue-100 text-blue-600 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-blue-200 transition-colors"
+                                            title="URL aus Nextcloud kopieren"
+                                        >
+                                            URL-Assistent
+                                        </button>
+                                        <button 
                                             onClick={async () => {
                                                 if (!config.nextcloudUrl) return alert("Bitte URL eingeben");
                                                 const user = prompt("Benutzername für Test:");
@@ -1734,27 +1785,17 @@ export default function App() {
                                                 if (!user || !pass) return;
                                                 
                                                 try {
-                                                    setStatus({ step: 'uploading', message: 'Teste Verbindung...' });
+                                                    setStatus({ step: 'uploading' });
+                                                    setUploadMessage('Teste Verbindung...');
                                                     const cleanUrl = config.nextcloudUrl.replace(/\/$/, '');
-                                                    const variations: string[] = [];
+                                                    let variations: string[] = [];
                                                     
-                                                    // If the user entered a full WebDAV URL, try it first
-                                                    if (cleanUrl.includes('/remote.php/')) {
-                                                        variations.push(cleanUrl);
-                                                        variations.push(cleanUrl + '/');
+                                                    if (config.manualWebdavUrl) {
+                                                        variations.push(config.manualWebdavUrl);
                                                     } else {
-                                                        // Standard variations
                                                         const bases = [cleanUrl, `${cleanUrl}/nextcloud`].filter(u => u);
                                                         const paths = ['/remote.php/dav/files/', '/remote.php/webdav/', '/index.php/remote.php/dav/files/'];
-                                                        const users = [
-                                                            config.webdavUsername, 
-                                                            user, 
-                                                            user.toLowerCase(), 
-                                                            user.replace(/\s+/g, ''), 
-                                                            user.includes('@') ? user : null,
-                                                            user.includes('@') ? user.split('@')[0] : null,
-                                                            user.replace(/\s+/g, '.').toLowerCase()
-                                                        ].filter((u): u is string => !!u);
+                                                        const users = [user, user.toLowerCase(), user.replace(/\s+/g, '')].filter(Boolean) as string[];
                                                         
                                                         for (const b of bases) {
                                                             for (const p of paths) {
@@ -1765,70 +1806,35 @@ export default function App() {
                                                         }
                                                     }
                                                     
-                                                    let log = "Verbindungs-Test Protokoll:\n";
                                                     let found = false;
-                                                    const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`;
-                                                    
                                                     for (const url of variations) {
-                                                        log += `Prüfe: ${url} ... `;
                                                         try {
-                                                            let res = await fetch('/api/nextcloud/proxy', {
+                                                            const res = await fetch('/api/nextcloud/proxy', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({ 
-                                                                    url, 
-                                                                    method: 'PROPFIND', 
-                                                                    username: user, 
-                                                                    password: pass, 
-                                                                    headers: { 'Depth': '0', 'Content-Type': 'application/xml' },
-                                                                    data: propfindBody
-                                                                })
+                                                                body: JSON.stringify({ url, method: 'PROPFIND', username: user, password: pass, headers: { 'Depth': '0' } })
                                                             });
-                                                            
-                                                            if (res.status === 405) {
-                                                                log += `(405 -> Versuche GET) `;
-                                                                res = await fetch('/api/nextcloud/proxy', {
-                                                                    method: 'POST',
-                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                    body: JSON.stringify({ url, method: 'GET', username: user, password: pass })
-                                                                });
-                                                            }
-                                                            
-                                                            log += `Status: ${res.status}\n`;
-                                                            
                                                             if (res.status === 207 || res.status === 401) {
                                                                 found = true;
-                                                                if (res.status === 401) {
-                                                                    alert(`Pfad gefunden, aber Authentifizierung fehlgeschlagen (401).\nBitte prüfen Sie Ihr Passwort.\nPfad: ${url}`);
-                                                                } else {
-                                                                    alert(`ERFOLG! Verbindung hergestellt.\nPfad: ${url}`);
-                                                                }
                                                                 saveConfig({ ...config, manualWebdavUrl: url });
+                                                                alert(res.status === 401 ? "Server gefunden, aber Passwort falsch." : "ERFOLG! Server-Verbindung konfiguriert.");
                                                                 break;
                                                             }
-                                                        } catch (e) {
-                                                            log += `Fehler: ${e}\n`;
-                                                        }
-                                                        if (found) break;
+                                                        } catch (e) {}
                                                     }
-                                                    
-                                                    if (!found) {
-                                                        console.log(log);
-                                                        alert("Verbindung fehlgeschlagen. Details in der Konsole (F12) oder kopieren Sie das Protokoll.");
-                                                        const copy = confirm("Möchten Sie das Test-Protokoll in die Zwischenablage kopieren?");
-                                                        if (copy) navigator.clipboard.writeText(log);
-                                                    }
+                                                    if (!found) alert("Verbindung fehlgeschlagen. Bitte prüfen Sie die Server-URL.");
                                                 } catch (err) {
-                                                    alert("Fehler beim Test: " + err);
+                                                    alert("Fehler: " + err);
                                                 } finally {
                                                     setStatus({ step: 'login' });
                                                 }
                                             }}
                                             className="bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-blue-700 transition-colors"
                                         >
-                                            Verbindung Testen
+                                            Testen
                                         </button>
                                     </div>
+                                    <p className="text-[9px] text-blue-400 ml-1">Die Basis-URL Ihres Nextcloud-Servers (wird für alle Benutzer verwendet).</p>
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">WebDAV Benutzername (Optional)</label>
