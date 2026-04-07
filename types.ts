@@ -23,6 +23,7 @@ export interface AppConfig {
   nextcloudUrl?: string; // Base URL of the Nextcloud instance
   manualWebdavUrl?: string; // Manual override for WebDAV URL
   webdavUsername?: string; // Explicit WebDAV username
+  defaultUploadFolder?: string; // Target folder in Nextcloud
 }
 
 export interface MaterialItem {

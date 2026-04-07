@@ -220,6 +220,7 @@ export default function App() {
   const [newTechName, setNewTechName] = useState('');
   const [newTechCode, setNewTechCode] = useState('');
   const [newTechPass, setNewTechPass] = useState('');
+  const [newTechNextcloudUser, setNewTechNextcloudUser] = useState('');
   const [newTechRole, setNewTechRole] = useState<'admin' | 'user'>('user');
 
   // Editing State for Technicians
@@ -227,6 +228,7 @@ export default function App() {
   const [editTechName, setEditTechName] = useState('');
   const [editTechCode, setEditTechCode] = useState('');
   const [editTechPass, setEditTechPass] = useState('');
+  const [editTechNextcloudUser, setEditTechNextcloudUser] = useState('');
   const [editTechRole, setEditTechRole] = useState<'admin' | 'user'>('user');
 
   // Form States
@@ -249,6 +251,13 @@ export default function App() {
   const [isGeneratingMissing, setIsGeneratingMissing] = useState(false);
   const [isGeneratingPdfOnly, setIsGeneratingPdfOnly] = useState(false);
   const [nextcloudCreds, setNextcloudCreds] = useState<{ user: string, pass: string, webdavUrl: string } | null>(null);
+  
+  // Folder Browsing States
+  const [isBrowsingFolders, setIsBrowsingFolders] = useState(false);
+  const [browseFolders, setBrowseFolders] = useState<{name: string, path: string}[]>([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [currentBrowsePath, setCurrentBrowsePath] = useState<string | null>(null);
+  const [browseCallback, setBrowseCallback] = useState<((path: string) => void) | null>(null);
   
   // Firebase Auth State
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -589,7 +598,18 @@ export default function App() {
       // Success!
       setNextcloudCreds({ user: effectiveUsername, pass: normalizedPassword, webdavUrl: finalWebdavUrl });
       
-      const tech: Technician = {
+      // Check if this technician is already in our config
+      const existingTech = config.technicians.find(t => 
+        t.nextcloudUser?.toLowerCase() === effectiveUsername.toLowerCase() || 
+        t.code?.toLowerCase() === normalizedCode.toLowerCase() ||
+        t.name?.toLowerCase() === normalizedCode.toLowerCase()
+      );
+
+      const tech: Technician = existingTech ? {
+        ...existingTech,
+        nextcloudUser: effectiveUsername,
+        nextcloudPass: normalizedPassword
+      } : {
         id: effectiveUsername,
         name: effectiveUsername,
         code: effectiveUsername.toUpperCase().substring(0, 3).replace(/[^A-Z]/g, 'X'),
@@ -721,6 +741,53 @@ export default function App() {
       if (!response.ok) {
         throw new Error(`Fehler beim Upload: ${response.status}`);
       }
+    },
+    async listFolders(url: string, creds: { user: string, pass: string }) {
+      const response = await fetch('/api/nextcloud/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url,
+          method: 'PROPFIND',
+          username: creds.user,
+          password: creds.pass,
+          headers: { 'Depth': '1' }
+        })
+      });
+      if (!response.ok) throw new Error(`Fehler beim Laden der Ordner: ${response.status}`);
+      const xmlText = await response.text();
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+      
+      // Handle different possible namespaces (d: or just response)
+      const getElements = (parent: Element | Document, name: string) => {
+        let el = parent.getElementsByTagName(`d:${name}`);
+        if (el.length === 0) el = parent.getElementsByTagName(name);
+        return el;
+      };
+
+      const responses = getElements(xmlDoc, "response");
+      const folders: { name: string, path: string }[] = [];
+      
+      // The first response is usually the directory itself
+      for (let i = 0; i < responses.length; i++) {
+        const href = getElements(responses[i], "href")[0]?.textContent || "";
+        const propstat = getElements(responses[i], "propstat")[0];
+        const prop = getElements(propstat, "prop")[0];
+        const resourcetype = getElements(prop, "resourcetype")[0];
+        const isCollection = getElements(resourcetype, "collection").length > 0;
+        
+        if (isCollection) {
+          const decodedHref = decodeURIComponent(href);
+          const parts = decodedHref.split('/').filter(p => p);
+          const name = parts[parts.length - 1] || "/";
+          
+          // We want to keep the path relative to the domain if it's a full path
+          // Nextcloud usually returns /remote.php/dav/files/user/folder/
+          folders.push({ name, path: decodedHref });
+        }
+      }
+      return folders;
     }
   };
 
@@ -731,6 +798,28 @@ export default function App() {
     setShowSettings(false); 
     setLoginCode(''); 
     setLoginPassword(''); 
+  };
+
+  const handleBrowseFolders = async (path?: string) => {
+    if (!nextcloudCreds) return;
+    setBrowseLoading(true);
+    setIsBrowsingFolders(true);
+    try {
+      // If path is provided, use it, otherwise use the base webdavUrl
+      let url = nextcloudCreds.webdavUrl;
+      if (path) {
+        const urlObj = new URL(nextcloudCreds.webdavUrl);
+        url = `${urlObj.origin}${path}`;
+      }
+      
+      const folders = await nextcloudProxy.listFolders(url, { user: nextcloudCreds.user, pass: nextcloudCreds.pass });
+      setBrowseFolders(folders);
+      setCurrentBrowsePath(path || new URL(nextcloudCreds.webdavUrl).pathname);
+    } catch (err) {
+      alert("Fehler beim Laden der Ordner: " + err);
+    } finally {
+      setBrowseLoading(false);
+    }
   };
 
   const downloadBlob = (blob: Blob, filename: string) => {
@@ -781,6 +870,7 @@ export default function App() {
     setEditTechName(tech.name);
     setEditTechCode(tech.code);
     setEditTechPass(tech.password || '');
+    setEditTechNextcloudUser(tech.nextcloudUser || '');
     setEditTechRole(tech.role);
   };
 
@@ -788,7 +878,7 @@ export default function App() {
     if (!editTechName || !editTechCode) return alert("Name und Kürzel sind Pflichtfelder.");
     const updatedTechs = config.technicians.map(t => 
         t.id === editingTechId 
-            ? { ...t, name: editTechName, code: editTechCode.toUpperCase(), password: editTechPass, role: editTechRole } 
+            ? { ...t, name: editTechName, code: editTechCode.toUpperCase(), password: editTechPass, nextcloudUser: editTechNextcloudUser, role: editTechRole } 
             : t
     );
     saveConfig({ ...config, technicians: updatedTechs });
@@ -892,7 +982,8 @@ export default function App() {
         setUploadMessage("Lade in Nextcloud hoch...");
         try {
           const project = config.projects[selectedProjectIndex];
-          const folderPath = (project.nextcloudPath || '/Bautagebuch').replace(/\/$/, '');
+          // Use global default folder if set, otherwise project specific, otherwise fallback
+          const folderPath = (config.defaultUploadFolder || project.nextcloudPath || '/Bautagebuch').replace(/\/$/, '');
           
           // Ensure folder exists (recursive)
           const folders = folderPath.split('/').filter(f => f);
@@ -1202,7 +1293,27 @@ export default function App() {
                         </div>
                       )}
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Nextcloud Benutzername</label>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Techniker auswählen oder eingeben</label>
+                        
+                        {config.technicians.length > 0 && (
+                          <div className="grid grid-cols-2 gap-2 mb-4">
+                            {config.technicians.map(t => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => setLoginCode(t.nextcloudUser || t.name)}
+                                className={`p-3 rounded-xl border text-xs font-bold transition-all ${
+                                  loginCode === (t.nextcloudUser || t.name) 
+                                    ? 'bg-brand-primary text-white border-brand-primary shadow-lg' 
+                                    : 'bg-white text-slate-600 border-slate-200 hover:border-brand-primary/50'
+                                }`}
+                              >
+                                {t.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
                         <input 
                           type="text" 
                           value={loginCode} 
@@ -1739,6 +1850,32 @@ export default function App() {
                                     />
                                     <p className="text-[9px] text-blue-400 ml-1">Nur nötig, wenn der WebDAV-Name von Ihrem Login-Namen abweicht.</p>
                                 </div>
+
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Zielordner für Uploads</label>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="text" 
+                                            readOnly
+                                            placeholder="/Bautagebuch" 
+                                            value={config.defaultUploadFolder || '/Bautagebuch'} 
+                                            className="flex-1 p-3 text-xs border border-blue-200 rounded-xl outline-none bg-gray-50" 
+                                        />
+                                        <button 
+                                            onClick={() => {
+                                                if (!nextcloudCreds) {
+                                                    alert("Bitte zuerst die Verbindung testen oder sich einloggen.");
+                                                    return;
+                                                }
+                                                handleBrowseFolders();
+                                            }}
+                                            className="bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-blue-700 transition-colors"
+                                        >
+                                            Durchsuchen
+                                        </button>
+                                    </div>
+                                    <p className="text-[9px] text-blue-400 ml-1">Wählen Sie den Ordner in Ihrer Nextcloud aus, in dem die Berichte gespeichert werden sollen.</p>
+                                </div>
                                 <div className="space-y-1">
                                     <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Manueller WebDAV-Pfad (Optional)</label>
                                     <input 
@@ -1781,6 +1918,22 @@ export default function App() {
                                             <p className="text-[10px] text-slate-400">Pfad: {p.nextcloudPath || '/Bautagebuch'}</p>
                                         </div>
                                         <div className="flex gap-2">
+                                            <button 
+                                                onClick={() => {
+                                                    if (!nextcloudCreds) return alert("Bitte zuerst einloggen oder Verbindung testen.");
+                                                    setBrowseCallback(() => (selectedPath: string) => {
+                                                        const updatedProjects = config.projects.map(pr => 
+                                                            pr.token === p.token ? { ...pr, nextcloudPath: selectedPath } : pr
+                                                        );
+                                                        saveConfig({ ...config, projects: updatedProjects });
+                                                    });
+                                                    handleBrowseFolders();
+                                                }}
+                                                className="text-blue-500 p-1 hover:bg-blue-50 rounded"
+                                                title="Ordner auswählen"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                                            </button>
                                             <button onClick={() => { if(confirm("Einsatzgebiet löschen?")) saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)}) }} className="text-red-400 p-1"><TrashIcon /></button>
                                         </div>
                                     </div>
@@ -1789,7 +1942,21 @@ export default function App() {
                         </div>
                         <div className="space-y-2 bg-white p-3 rounded-lg border shadow-sm">
                             <input placeholder="Name des Einsatzgebiets" value={newProjName} onChange={e => setNewProjName(e.target.value)} className="w-full p-2 border rounded text-sm" />
-                            <input placeholder="Nextcloud Pfad (z.B. /Projekte/Berlin)" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="w-full p-2 border rounded text-sm" />
+                            <div className="flex gap-2">
+                                <input placeholder="Nextcloud Pfad (z.B. /Projekte/Berlin)" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="flex-1 p-2 border rounded text-sm" />
+                                <button 
+                                    onClick={() => {
+                                        if (!nextcloudCreds) return alert("Bitte zuerst einloggen oder Verbindung testen.");
+                                        setBrowseCallback(() => (selectedPath: string) => {
+                                            setNewProjLink(selectedPath);
+                                        });
+                                        handleBrowseFolders();
+                                    }}
+                                    className="bg-blue-100 text-blue-600 px-3 rounded-lg text-[10px] font-bold uppercase"
+                                >
+                                    Wählen
+                                </button>
+                            </div>
                             <Button onClick={() => {
                                 if (!newProjName) return alert("Bitte Namen eingeben.");
                                 const token = Math.random().toString(36).substr(2, 9);
@@ -1811,8 +1978,9 @@ export default function App() {
                                             <input value={editTechName} onChange={e => setEditTechName(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Name" />
                                             <div className="grid grid-cols-2 gap-2">
                                                 <input value={editTechCode} onChange={e => setEditTechCode(e.target.value)} className="w-full p-1 border rounded text-xs uppercase" placeholder="Kürzel" />
-                                                <input value={editTechPass} onChange={e => setEditTechPass(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Passwort" />
+                                                <input value={editTechPass} onChange={e => setEditTechPass(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Login-Passwort" />
                                             </div>
+                                            <input value={editTechNextcloudUser} onChange={e => setEditTechNextcloudUser(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Nextcloud Benutzername" />
                                             <div className="flex justify-between items-center pt-1">
                                                 <select value={editTechRole} onChange={e => setEditTechRole(e.target.value as any)} className="text-[10px] p-1 border rounded">
                                                     <option value="user">User</option>
@@ -1828,7 +1996,7 @@ export default function App() {
                                         <div className="flex justify-between items-center">
                                             <div className="truncate">
                                                 <span className="font-bold text-brand-700">[{t.code}]</span> {t.name}
-                                                <p className="text-[9px] text-gray-400">Rolle: {t.role} | PW: {t.password}</p>
+                                                <p className="text-[9px] text-gray-400">Rolle: {t.role} | NC-User: {t.nextcloudUser || 'Wie Name'}</p>
                                             </div>
                                             <div className="flex gap-1">
                                                 <button onClick={() => startEditingTech(t)} className="p-1 text-brand-400 hover:text-brand-600"><EditIcon /></button>
@@ -1846,16 +2014,24 @@ export default function App() {
                             <input placeholder="Name" value={newTechName} onChange={e => setNewTechName(e.target.value)} className="w-full p-2 border rounded text-xs mb-2 shadow-inner" />
                             <div className="grid grid-cols-2 gap-2 mb-2">
                                 <input placeholder="Kürzel" value={newTechCode} onChange={e => setNewTechCode(e.target.value)} className="w-full p-2 border rounded text-xs uppercase" />
-                                <input placeholder="Passwort" value={newTechPass} onChange={e => setNewTechPass(e.target.value)} className="w-full p-2 border rounded text-xs" />
+                                <input placeholder="Login-Passwort" value={newTechPass} onChange={e => setNewTechPass(e.target.value)} className="w-full p-2 border rounded text-xs" />
                             </div>
+                            <input placeholder="Nextcloud Benutzername (Optional)" value={newTechNextcloudUser} onChange={e => setNewTechNextcloudUser(e.target.value)} className="w-full p-2 border rounded text-xs mb-2 shadow-inner" />
                             <select value={newTechRole} onChange={e => setNewTechRole(e.target.value as any)} className="w-full p-2 border rounded text-xs bg-white mb-2 shadow-inner">
                                 <option value="user">Techniker (User)</option>
                                 <option value="admin">Administrator</option>
                             </select>
                             <Button onClick={() => {
                                 if (!newTechName || !newTechCode) return alert("Felder füllen.");
-                                saveConfig({...config, technicians: [...config.technicians, { id: Date.now().toString(), name: newTechName, code: newTechCode.toUpperCase(), password: newTechPass, role: newTechRole }]});
-                                setNewTechName(''); setNewTechCode(''); setNewTechPass('');
+                                saveConfig({...config, technicians: [...config.technicians, { 
+                                    id: Date.now().toString(), 
+                                    name: newTechName, 
+                                    code: newTechCode.toUpperCase(), 
+                                    password: newTechPass, 
+                                    nextcloudUser: newTechNextcloudUser || newTechName,
+                                    role: newTechRole 
+                                }]});
+                                setNewTechName(''); setNewTechCode(''); setNewTechPass(''); setNewTechNextcloudUser('');
                             }} variant="secondary" className="w-full py-1 text-xs">Techniker hinzufügen</Button>
                         </div>
                     </div>
@@ -1930,6 +2106,116 @@ export default function App() {
 
             <Button onClick={() => setShowHelp(false)} className="w-full mt-8 py-4 rounded-2xl font-bold">Verstanden</Button>
           </div>
+        </div>
+      )}
+
+      {isBrowsingFolders && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
+            <div className="bg-white rounded-3xl p-6 w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Ordner auswählen</h3>
+                    <button onClick={() => setIsBrowsingFolders(false)} className="p-2 text-slate-400 hover:text-slate-600"><CloseIcon /></button>
+                </div>
+                
+                <div className="mb-4 p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></div>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">Pfad: {currentBrowsePath || '/'}</span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                    {browseLoading ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                            <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-blue-600 mb-4"></div>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Lade Ordner...</p>
+                        </div>
+                    ) : (
+                        <>
+                            {currentBrowsePath && currentBrowsePath !== '/' && (
+                                <button 
+                                    onClick={() => {
+                                        const parts = currentBrowsePath.split('/').filter(p => p);
+                                        parts.pop();
+                                        // Find the remote.php/dav/files/user part to not go above it
+                                        const basePath = new URL(nextcloudCreds?.webdavUrl || '').pathname;
+                                        const newPath = '/' + parts.join('/') + '/';
+                                        if (newPath.length < basePath.length) {
+                                            handleBrowseFolders(); // Reset to base
+                                        } else {
+                                            handleBrowseFolders(newPath);
+                                        }
+                                    }}
+                                    className="w-full p-4 flex items-center gap-3 bg-slate-50 hover:bg-slate-100 rounded-2xl border border-dashed border-slate-200 transition-all group"
+                                >
+                                    <div className="p-2 bg-white rounded-lg shadow-sm group-hover:scale-110 transition-transform">
+                                        <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
+                                    </div>
+                                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Zurück</span>
+                                </button>
+                            )}
+                            {browseFolders.length === 0 ? (
+                                <div className="text-center py-12">
+                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Keine Unterordner gefunden</p>
+                                </div>
+                            ) : (
+                                browseFolders.map(f => (
+                                    <button 
+                                        key={f.path}
+                                        onClick={() => handleBrowseFolders(f.path)}
+                                        className="w-full p-4 flex items-center justify-between bg-white hover:bg-blue-50 rounded-2xl border border-slate-100 hover:border-blue-200 transition-all group"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2 bg-blue-100 rounded-lg text-blue-600 group-hover:scale-110 transition-transform">
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                                            </div>
+                                            <span className="text-sm font-bold text-slate-700">{f.name}</span>
+                                        </div>
+                                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+                                        </div>
+                                    </button>
+                                ))
+                            )}
+                        </>
+                    )}
+                </div>
+
+                <div className="mt-6 pt-6 border-t border-slate-100 flex gap-3">
+                    <Button 
+                        variant="outline" 
+                        onClick={() => setIsBrowsingFolders(false)}
+                        className="flex-1 py-4 rounded-2xl"
+                    >
+                        Abbrechen
+                    </Button>
+                    <Button 
+                        onClick={() => {
+                            // We want the path relative to the user's home if possible, 
+                            // or just the full path if that's what we have.
+                            // Nextcloud paths are usually /remote.php/dav/files/user/FOLDER
+                            const basePath = new URL(nextcloudCreds?.webdavUrl || '').pathname;
+                            let relativePath = currentBrowsePath || '/';
+                            if (relativePath.startsWith(basePath)) {
+                                relativePath = relativePath.substring(basePath.length);
+                            }
+                            // Ensure it starts with / and doesn't end with / unless it's just /
+                            if (!relativePath.startsWith('/')) relativePath = '/' + relativePath;
+                            if (relativePath.length > 1 && relativePath.endsWith('/')) relativePath = relativePath.slice(0, -1);
+                            
+                            if (browseCallback) {
+                                browseCallback(relativePath);
+                                setBrowseCallback(null);
+                            } else {
+                                saveConfig({ ...config, defaultUploadFolder: relativePath });
+                            }
+                            setIsBrowsingFolders(false);
+                        }}
+                        disabled={!currentBrowsePath}
+                        className="flex-1 py-4 rounded-2xl shadow-lg shadow-blue-600/20"
+                    >
+                        Auswählen
+                    </Button>
+                </div>
+            </div>
         </div>
       )}
     </div>
