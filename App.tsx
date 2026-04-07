@@ -403,6 +403,8 @@ export default function App() {
 
   // Listen for Nextcloud OAuth success (REMOVED)
   
+  const [showPassword, setShowPassword] = useState(false);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -1285,46 +1287,63 @@ export default function App() {
                           className="w-full text-center text-xl font-medium p-5 border border-slate-200 rounded-2xl outline-none input-focus bg-slate-50/50" 
                         />
                       </div>
-                      <div className="space-y-2">
+                      <div className="space-y-2 relative">
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">App-Passwort</label>
-                        <input 
-                          type="password" 
-                          value={loginPassword} 
-                          onChange={e => setLoginPassword(e.target.value)} 
-                          placeholder="•••• •••• •••• ••••" 
-                          className="w-full text-center text-xl p-5 border border-slate-200 rounded-2xl outline-none input-focus bg-slate-50/50" 
-                        />
+                        <div className="relative">
+                          <input 
+                            type={showPassword ? "text" : "password"} 
+                            value={loginPassword} 
+                            onChange={e => setLoginPassword(e.target.value)} 
+                            placeholder="•••• •••• •••• ••••" 
+                            className="w-full text-center text-xl p-5 border border-slate-200 rounded-2xl outline-none input-focus bg-slate-50/50 pr-14" 
+                          />
+                          <button 
+                            type="button"
+                            onClick={() => setShowPassword(!showPassword)}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-brand-primary transition-colors"
+                            title={showPassword ? "Passwort verbergen" : "Passwort anzeigen"}
+                          >
+                            {showPassword ? (
+                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" /></svg>
+                            ) : (
+                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                            )}
+                          </button>
+                        </div>
                       </div>
                       <Button type="submit" className="w-full py-5 text-lg font-black rounded-2xl shadow-xl shadow-brand-primary/20 bg-brand-primary hover:bg-brand-primary/90 active:scale-[0.98] transition-all">
                         ANMELDEN & STARTEN
                       </Button>
 
-                      <button 
-                        type="button"
-                        onClick={() => setShowHelp(true)}
-                        className="w-full text-[10px] text-slate-400 font-bold uppercase tracking-widest hover:text-brand-primary transition-colors py-2"
-                      >
-                        Hilfe zur Verbindung
-                      </button>
-                      
-                      <p className="text-[10px] text-slate-400 text-center mt-4 leading-relaxed">
-                        Nutzen Sie Ihren Nextcloud-Benutzernamen und ein <br/>
-                        <a href={`${(config.nextcloudUrl || 'https://nextcloud.it-kom.de').replace(/\/index\.php\/?$/, '')}/index.php/settings/user/security`} target="_blank" rel="noopener noreferrer" className="text-brand-primary underline font-bold">App-Passwort hier erstellen</a>
-                      </p>
-                      
-                      <div className="mt-4 p-4 bg-blue-50 rounded-2xl border border-blue-100 space-y-3">
-                        <p className="text-[10px] text-blue-700 leading-relaxed">
-                          <span className="font-bold">So finden Sie Ihren Benutzernamen:</span>
-                        </p>
-                        <ul className="text-[9px] text-blue-600 space-y-1 list-disc ml-4">
-                          <li>Klicken Sie in Nextcloud unten links auf das <span className="font-bold">Zahnrad (Einstellungen)</span>.</li>
-                          <li>Dort steht ganz unten eine <span className="font-bold">WebDAV-Adresse</span>.</li>
-                          <li>Der Teil nach <span className="italic">.../files/</span> ist Ihr Benutzername.</li>
-                          <li>Oft ist es auch einfach Ihre <span className="font-bold">E-Mail-Adresse</span>.</li>
-                        </ul>
-                        <p className="text-[9px] text-blue-500 italic border-t border-blue-100 pt-2">
-                          Tipp: Bei IONOS ist es meistens Ihr voller Name (z.B. "Max Mustermann").
-                        </p>
+                      <div className="mt-6 p-5 bg-blue-50 rounded-3xl border border-blue-100 space-y-4">
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xs shrink-0">1</div>
+                          <p className="text-[11px] text-blue-800 leading-relaxed">
+                            Klicken Sie in Nextcloud unten links auf das <span className="font-bold">Zahnrad (Einstellungen)</span> &rarr; <span className="font-bold">Sicherheit</span>.
+                          </p>
+                        </div>
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xs shrink-0">2</div>
+                          <p className="text-[11px] text-blue-800 leading-relaxed">
+                            Geben Sie ganz unten bei "App-Name" <span className="font-bold">Bautagebuch</span> ein und klicken Sie auf <span className="font-bold">Neues App-Passwort erstellen</span>.
+                          </p>
+                        </div>
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xs shrink-0">3</div>
+                          <p className="text-[11px] text-blue-800 leading-relaxed">
+                            Kopieren Sie das Passwort (z.B. <span className="italic">abcd-efgh-ijkl-mnop</span>) und fügen Sie es oben ein. <span className="font-bold">Wichtig:</span> Das normale Login-Passwort funktioniert hier nicht!
+                          </p>
+                        </div>
+                        <div className="pt-2 border-t border-blue-100">
+                          <a 
+                            href={`${(config.nextcloudUrl || 'https://nextcloud.it-kom.de').replace(/\/index\.php\/?$/, '')}/index.php/settings/user/security`} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="block text-center text-[10px] font-black text-brand-primary uppercase tracking-widest hover:underline"
+                          >
+                            Direkt zu den Sicherheitseinstellungen &rarr;
+                          </a>
+                        </div>
                       </div>
                   </form>
               </div>
