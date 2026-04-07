@@ -12,28 +12,45 @@ app.use(express.json({ limit: '50mb' }));
 
 // Nextcloud Proxy Routes to bypass CORS
 app.post('/api/nextcloud/proxy', async (req, res) => {
-  const { url, method, username, password, data, headers } = req.body;
+  const { url, method, username, password, data, headers: customHeaders } = req.body;
 
   try {
-    const response = await axios({
+    const axiosConfig: any = {
       url,
-      method,
+      method: method || 'GET',
       auth: {
         username,
         password
       },
-      data: data ? (typeof data === 'string' && data.startsWith('data:') ? Buffer.from(data.split(',')[1], 'base64') : data) : undefined,
       headers: {
-        ...headers,
-        'User-Agent': 'Bautagebuch-App/1.0'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        ...customHeaders
       },
-      responseType: 'arraybuffer'
-    });
+      responseType: 'arraybuffer',
+      maxRedirects: 5,
+      validateStatus: () => true // Handle all status codes manually
+    };
 
+    if (data) {
+      axiosConfig.data = typeof data === 'string' && data.startsWith('data:') 
+        ? Buffer.from(data.split(',')[1], 'base64') 
+        : data;
+    }
+
+    const response = await axios(axiosConfig);
+
+    // Forward relevant headers
+    if (response.headers['content-type']) {
+      res.setHeader('Content-Type', response.headers['content-type']);
+    }
+    
     res.status(response.status).send(response.data);
   } catch (error: any) {
     console.error('Nextcloud Proxy Error:', error.response?.status, error.message);
-    res.status(error.response?.status || 500).send(error.response?.data || error.message);
+    const status = error.response?.status || 500;
+    const errorData = error.response?.data || error.message;
+    res.status(status).send(errorData);
   }
 });
 

@@ -221,6 +221,7 @@ export default function App() {
   const [newTechCode, setNewTechCode] = useState('');
   const [newTechPass, setNewTechPass] = useState('');
   const [newTechNextcloudUser, setNewTechNextcloudUser] = useState('');
+  const [newTechNextcloudPass, setNewTechNextcloudPass] = useState('');
   const [newTechRole, setNewTechRole] = useState<'admin' | 'user'>('user');
 
   // Editing State for Technicians
@@ -229,6 +230,7 @@ export default function App() {
   const [editTechCode, setEditTechCode] = useState('');
   const [editTechPass, setEditTechPass] = useState('');
   const [editTechNextcloudUser, setEditTechNextcloudUser] = useState('');
+  const [editTechNextcloudPass, setEditTechNextcloudPass] = useState('');
   const [editTechRole, setEditTechRole] = useState<'admin' | 'user'>('user');
 
   // Form States
@@ -407,244 +409,159 @@ export default function App() {
     const normalizedCode = loginCode.trim();
     const normalizedPassword = loginPassword.trim();
 
-    // 1. Master Admin Override (Local fallback)
-    if (normalizedCode === 'ADMIN' && normalizedPassword === 'admin123') {
-        const adminTech: Technician = {
-            id: 'admin-master',
-            name: 'Administrator',
-            code: 'ADMIN',
-            password: 'admin123',
-            role: 'admin'
-        };
-        await performFirebaseLogin(adminTech);
+    if (!normalizedCode || !normalizedPassword) {
+        setStatus({ step: 'error', error: "Bitte Benutzername und Passwort eingeben." });
         return;
     }
 
-    // 2. Nextcloud Login attempt (Simple Method)
+    // 1. Check for stored technician (App Login)
+    const storedTech = config.technicians.find(t => 
+        t.code.toUpperCase() === normalizedCode.toUpperCase() || 
+        t.nextcloudUser?.toLowerCase() === normalizedCode.toLowerCase() ||
+        t.name.toLowerCase() === normalizedCode.toLowerCase()
+    );
+
+    if (storedTech) {
+        // If technician has a password set, verify it
+        if (storedTech.password && storedTech.password !== normalizedPassword) {
+            setStatus({ step: 'error', error: "Falsches Login-Passwort für diesen Techniker." });
+            return;
+        }
+
+        // If verified (or no password set), try to connect to Nextcloud
+        setStatus({ step: 'uploading' });
+        setUploadMessage(`Verbinde für ${storedTech.name}...`);
+
+        // Use stored Nextcloud credentials if available, otherwise use entered password
+        const ncUser = storedTech.nextcloudUser || storedTech.name;
+        const ncPass = storedTech.nextcloudPass || normalizedPassword;
+
+        try {
+            const webdavUrl = await discoverWebdavUrl(ncUser, ncPass);
+            setNextcloudCreds({ user: ncUser, pass: ncPass, webdavUrl });
+            await performFirebaseLogin(storedTech);
+            return;
+        } catch (err: any) {
+            handleLoginError(err);
+            return;
+        }
+    }
+
+    // 2. Fallback: Discovery Login (for new users or direct Nextcloud login)
     setStatus({ step: 'uploading' });
     setUploadMessage("Verbinde mit Nextcloud...");
     
     try {
-      // 1. Check for manual override (Smart Template Logic)
-      if (config.manualWebdavUrl) {
-          setUploadMessage("Prüfe Pfad-Vorlage...");
-          
-          // Determine the base path (everything before /files/)
-          const hasFilesPart = config.manualWebdavUrl.includes('/files/');
-          const basePath = hasFilesPart ? config.manualWebdavUrl.split('/files/')[0] + '/files/' : config.manualWebdavUrl;
-          
-          // Try variations for the current user based on the manual template
-          const manualUrl = config.manualWebdavUrl || "";
-          const manualVariations = [
-              manualUrl, // 1. Exactly as entered
-              manualUrl.endsWith('/') ? manualUrl : manualUrl + '/', // Ensure trailing slash
-              manualUrl.replace(/\/$/, ''), // No trailing slash
-              config.webdavUsername ? `${basePath}${encodeURIComponent(config.webdavUsername)}/` : '', // 2. Explicit WebDAV User
-              `${basePath}${encodeURIComponent(normalizedCode)}/`, // 3. Base + Current User
-              `${basePath}${encodeURIComponent(normalizedCode.toLowerCase())}/`, // 4. Base + Lowercase User
-              `${basePath}${encodeURIComponent(normalizedCode.replace(/\s+/g, ''))}/`, // 5. Base + User (no spaces)
-              `${basePath}${encodeURIComponent(normalizedCode.replace(/\s+/g, '%20'))}/`, // 6. Base + User (manual spaces)
-              `${basePath}${encodeURIComponent(normalizedCode.split('@')[0])}/` // 7. Base + Email-Prefix
-          ];
-
-          // Filter duplicates and empty strings
-          const uniqueManualUrls = [...new Set(manualVariations)].filter(u => u && u.startsWith('http'));
-          let lastTriedManualUrl = "";
-
-          for (const testUrl of uniqueManualUrls) {
-              lastTriedManualUrl = testUrl;
-              try {
-                  const exists = await nextcloudProxy.exists(testUrl, { user: normalizedCode, pass: normalizedPassword });
-                  if (exists) {
-                      setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl: testUrl });
-                      const tech: Technician = {
-                          id: normalizedCode,
-                          name: normalizedCode,
-                          code: normalizedCode.toUpperCase().substring(0, 3).replace(/[^A-Z]/g, 'X'),
-                          role: 'user',
-                          nextcloudUser: normalizedCode,
-                          nextcloudPass: normalizedPassword
-                      };
-                      await performFirebaseLogin(tech);
-                      return;
-                  }
-              } catch (e: any) {
-                  if (e.message === "AUTH_FAILED") throw new Error("401: Benutzername oder App-Passwort falsch.");
-                  // Continue to next variation if just 404
-              }
-          }
-          
-          // If we are here, manual path variations failed
-          throw new Error(`404: WebDAV-Pfad nicht gefunden.\nLetzter Versuch: ${lastTriedManualUrl}\n\nBitte prüfen Sie den Benutzernamen in Nextcloud unter "Einstellungen > Mobil & Desktop".`);
-      }
-
-      // 2. Fallback to Robust URL Discovery (if no manual path or manual failed)
-      const rawUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de').trim();
-      
-      // Smart Base URL extraction: Handle cases where user pastes the full WebDAV URL
-      let baseUrl = rawUrl;
-      if (rawUrl.includes('/remote.php')) {
-          baseUrl = rawUrl.split('/remote.php')[0];
-      } else if (rawUrl.includes('/index.php')) {
-          baseUrl = rawUrl.split('/index.php')[0];
-      }
-      baseUrl = baseUrl.replace(/\/$/, '');
-      
-      // Base URL variations (some IONOS setups need /nextcloud, some don't)
-      const baseUrlVariations = [
-        baseUrl,
-        baseUrl.includes('/nextcloud') ? baseUrl : `${baseUrl}/nextcloud`
-      ];
-
-      // Username variations
-      const userInputs = [
-        config.webdavUsername, // Try explicit WebDAV username first if provided
-        normalizedCode,
-        normalizedCode.toLowerCase(), // ronja holdorf
-        normalizedCode.split('@')[0], // Extract name if email was entered
-        normalizedCode.replace(/\s+/g, ''), // Name without spaces
-        normalizedCode.replace(/\s+/g, '.').toLowerCase(), // ronja.holdorf
-        normalizedCode.replace(/\s+/g, '_'), // Name with underscores
-        normalizedCode.includes('@') ? normalizedCode.replace('@', '%40') : null, // Full email encoded
-        'ronja.holdorf15@gmail.com',
-        'ronja.holdorf15'
-      ].filter((u): u is string => !!u);
-      // Remove duplicates and empty strings, ensuring they are strings
-      const uniqueUsers = Array.from(new Set(userInputs.filter((u): u is string => !!u)));
-
-      // Path variations
-      const basePaths = [
-        '/remote.php/dav/files/',
-        '/remote.php/webdav/', // Generic WebDAV endpoint
-        '/index.php/remote.php/dav/files/',
-        '/index.php/remote.php/webdav/',
-        '/remote.php/dav/',
-        '/index.php/remote.php/dav/',
-      ];
-      
-      let success = false;
-      let finalWebdavUrl = '';
-      let effectiveUsername = '';
-      let isAuthError = false;
-      let triedUrls: string[] = [];
-
-      // If the user provided a full WebDAV URL, try it first
-      if (rawUrl.includes('/remote.php/dav/files/') || rawUrl.includes('/remote.php/webdav/')) {
-          triedUrls.push(rawUrl);
-          try {
-              const exists = await nextcloudProxy.exists(rawUrl, { user: normalizedCode, pass: normalizedPassword });
-              if (exists) {
-                  success = true;
-                  effectiveUsername = normalizedCode;
-                  finalWebdavUrl = rawUrl;
-              }
-          } catch (e: any) {
-              if (e.message === "AUTH_FAILED") isAuthError = true;
-          }
-      }
-
-      // Systematic discovery if not already successful
-      if (!success) {
-        discoveryLoop:
-        for (const base of baseUrlVariations) {
-          for (const basePath of basePaths) {
-            for (const user of uniqueUsers) {
-              const isGenericPath = basePath.endsWith('/webdav/') || basePath.endsWith('/dav/');
-              
-              // Try both encodeURIComponent and raw (some servers are picky)
-              const userVariants = [encodeURIComponent(user), user];
-              
-              for (const userPart of userVariants) {
-                const webdavUrl = isGenericPath 
-                  ? `${base}${basePath}`
-                  : `${base}${basePath}${userPart}/`;
-                
-                if (triedUrls.includes(webdavUrl)) continue;
-                triedUrls.push(webdavUrl);
-                if (triedUrls.length > 50) triedUrls.shift();
-
-                try {
-                  const authUsers = [user, normalizedCode];
-                  for (const authUser of authUsers) {
-                    const exists = await nextcloudProxy.exists(webdavUrl, { user: authUser, pass: normalizedPassword });
-                    if (exists) {
-                      success = true;
-                      effectiveUsername = authUser;
-                      finalWebdavUrl = webdavUrl;
-                      break discoveryLoop;
-                    }
-                  }
-                } catch (e: any) {
-                  if (e.message === "AUTH_FAILED") {
-                    isAuthError = true;
-                    if (!isGenericPath) effectiveUsername = user;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-
-      if (isAuthError && !success) {
-          throw new Error(`401: Benutzername oder App-Passwort falsch.\n(Geprüft für: ${effectiveUsername || normalizedCode})`);
-      }
-      
-      if (!success) {
-          const debugInfo = `Tried URLs:\n${triedUrls.join('\n')}`;
-          throw new Error(`404: WebDAV-Pfad nicht gefunden.\n\nBitte prüfen Sie die Federated Cloud ID oder kopieren Sie den WebDAV-Link aus den Nextcloud-Einstellungen.\n\nDEBUG_INFO_START\n${debugInfo}\nDEBUG_INFO_END`);
-      }
-      
-      // Success!
-      setNextcloudCreds({ user: effectiveUsername, pass: normalizedPassword, webdavUrl: finalWebdavUrl });
-      
-      // Check if this technician is already in our config
-      const existingTech = config.technicians.find(t => 
-        t.nextcloudUser?.toLowerCase() === effectiveUsername.toLowerCase() || 
-        t.code?.toLowerCase() === normalizedCode.toLowerCase() ||
-        t.name?.toLowerCase() === normalizedCode.toLowerCase()
-      );
-
-      const tech: Technician = existingTech ? {
-        ...existingTech,
-        nextcloudUser: effectiveUsername,
-        nextcloudPass: normalizedPassword
-      } : {
-        id: effectiveUsername,
-        name: effectiveUsername,
-        code: effectiveUsername.toUpperCase().substring(0, 3).replace(/[^A-Z]/g, 'X'),
-        role: 'user',
-        nextcloudUser: effectiveUsername,
-        nextcloudPass: normalizedPassword
-      };
-
-      await performFirebaseLogin(tech);
+        const webdavUrl = await discoverWebdavUrl(normalizedCode, normalizedPassword);
+        setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl });
+        
+        // Create a temporary technician object
+        const tech: Technician = {
+            id: normalizedCode,
+            name: normalizedCode,
+            code: normalizedCode.toUpperCase().substring(0, 3).replace(/[^A-Z]/g, 'X'),
+            role: 'user',
+            nextcloudUser: normalizedCode,
+            nextcloudPass: normalizedPassword
+        };
+        
+        await performFirebaseLogin(tech);
     } catch (err: any) {
-      console.error("Nextcloud Login failed:", err);
-      
-      let errorMsg = "Anmeldung fehlgeschlagen.";
-      let debugInfo = "";
-      
-      if (err.message?.includes('DEBUG_INFO_START')) {
-          const parts = err.message.split('DEBUG_INFO_START');
-          errorMsg = parts[0].trim();
-          debugInfo = parts[1].split('DEBUG_INFO_END')[0].trim();
-      } else {
-          errorMsg = err.message || "Anmeldung fehlgeschlagen.";
-      }
-
-      if (errorMsg.includes('401')) {
-          errorMsg = "Fehler 401: Benutzername oder App-Passwort falsch. Bitte prüfen Sie Ihre Eingaben.";
-      } else if (errorMsg.includes('404')) {
-          errorMsg = "Fehler 404: WebDAV-Pfad nicht gefunden.";
-      }
-
-      setStatus({ 
-        step: 'error', 
-        error: errorMsg,
-        details: debugInfo ? debugInfo : undefined
-      });
+        handleLoginError(err);
     }
+  };
+
+  const handleLoginError = (err: any) => {
+    console.error("Login failed:", err);
+    let errorMsg = "Anmeldung fehlgeschlagen.";
+    let debugInfo = "";
+    
+    if (err.message?.includes('DEBUG_INFO_START')) {
+        const parts = err.message.split('DEBUG_INFO_START');
+        errorMsg = parts[0].trim();
+        debugInfo = parts[1].split('DEBUG_INFO_END')[0].trim();
+    } else {
+        errorMsg = err.message || "Anmeldung fehlgeschlagen.";
+    }
+
+    if (errorMsg.includes('401')) {
+        errorMsg = "Fehler 401: Benutzername oder App-Passwort falsch. Bitte prüfen Sie Ihre Eingaben.";
+    } else if (errorMsg.includes('404')) {
+        errorMsg = "Fehler 404: WebDAV-Pfad nicht gefunden.";
+    }
+
+    setStatus({ 
+      step: 'error', 
+      error: errorMsg,
+      details: debugInfo ? debugInfo : undefined
+    });
+  };
+
+  const discoverWebdavUrl = async (user: string, pass: string): Promise<string> => {
+    // 1. Check for manual override
+    if (config.manualWebdavUrl) {
+        const hasFilesPart = config.manualWebdavUrl.includes('/files/');
+        const basePath = hasFilesPart ? config.manualWebdavUrl.split('/files/')[0] + '/files/' : config.manualWebdavUrl;
+        
+        const manualVariations = [
+            config.manualWebdavUrl,
+            config.manualWebdavUrl.endsWith('/') ? config.manualWebdavUrl : config.manualWebdavUrl + '/',
+            config.manualWebdavUrl.replace(/\/$/, ''),
+            config.webdavUsername ? `${basePath}${encodeURIComponent(config.webdavUsername)}/` : '',
+            `${basePath}${encodeURIComponent(user)}/`,
+            `${basePath}${encodeURIComponent(user.toLowerCase())}/`,
+            `${basePath}${encodeURIComponent(user.replace(/\s+/g, ''))}/`,
+            `${basePath}${encodeURIComponent(user.split('@')[0])}/`
+        ];
+
+        const uniqueManualUrls = [...new Set(manualVariations)].filter(u => u && u.startsWith('http'));
+        let lastTried = "";
+
+        for (const testUrl of uniqueManualUrls) {
+            lastTried = testUrl;
+            try {
+                const exists = await nextcloudProxy.exists(testUrl, { user, pass });
+                if (exists) return testUrl;
+            } catch (e: any) {
+                if (e.message === "AUTH_FAILED") throw new Error("AUTH_FAILED");
+            }
+        }
+        throw new Error(`404: WebDAV-Pfad nicht gefunden.\nLetzter Versuch: ${lastTried}`);
+    }
+
+    // 2. Fallback to Robust URL Discovery
+    const rawUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de').trim();
+    let baseUrl = rawUrl;
+    if (rawUrl.includes('/remote.php')) baseUrl = rawUrl.split('/remote.php')[0];
+    else if (rawUrl.includes('/index.php')) baseUrl = rawUrl.split('/index.php')[0];
+    baseUrl = baseUrl.replace(/\/$/, '');
+    
+    const baseUrlVariations = [baseUrl, baseUrl.includes('/nextcloud') ? baseUrl : `${baseUrl}/nextcloud`];
+    const userInputs = [config.webdavUsername, user, user.toLowerCase(), user.split('@')[0], user.replace(/\s+/g, '')].filter(Boolean) as string[];
+    const uniqueUsers = Array.from(new Set(userInputs));
+    const basePaths = ['/remote.php/dav/files/', '/remote.php/webdav/', '/index.php/remote.php/dav/files/', '/remote.php/dav/'];
+    
+    let triedUrls: string[] = [];
+    let isAuthError = false;
+
+    for (const base of baseUrlVariations) {
+        for (const basePath of basePaths) {
+            for (const u of uniqueUsers) {
+                const testUrl = `${base}${basePath}${encodeURIComponent(u)}/`;
+                triedUrls.push(testUrl);
+                try {
+                    const exists = await nextcloudProxy.exists(testUrl, { user, pass });
+                    if (exists) return testUrl;
+                } catch (e: any) {
+                    if (e.message === "AUTH_FAILED") isAuthError = true;
+                }
+            }
+        }
+    }
+    
+    if (isAuthError) throw new Error("401: Authentifizierung fehlgeschlagen.");
+    const debugInfo = `DEBUG_INFO_START\nVersuchte Pfade:\n${triedUrls.join('\n')}\nDEBUG_INFO_END`;
+    throw new Error(`404: WebDAV-Pfad konnte nicht automatisch ermittelt werden.\n\n${debugInfo}`);
   };
 
   const performFirebaseLogin = async (tech: Technician) => {
@@ -685,6 +602,7 @@ export default function App() {
   const nextcloudProxy = {
     async exists(url: string, creds: { user: string, pass: string }) {
       try {
+        const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`;
         const response = await fetch('/api/nextcloud/proxy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -693,10 +611,23 @@ export default function App() {
             method: 'PROPFIND',
             username: creds.user,
             password: creds.pass,
-            headers: { 'Depth': '0' }
+            headers: { 'Depth': '0', 'Content-Type': 'application/xml' },
+            data: propfindBody
           })
         });
+        
         if (response.status === 401) throw new Error("AUTH_FAILED");
+        
+        // If PROPFIND is not allowed, try GET
+        if (response.status === 405) {
+          const getResponse = await fetch('/api/nextcloud/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, method: 'GET', username: creds.user, password: creds.pass })
+          });
+          return getResponse.status === 200 || getResponse.status === 401;
+        }
+        
         return response.status === 207 || response.status === 200;
       } catch (e: any) {
         if (e.message === "AUTH_FAILED") throw e;
@@ -743,6 +674,7 @@ export default function App() {
       }
     },
     async listFolders(url: string, creds: { user: string, pass: string }) {
+      const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/><d:resourcetype/></d:prop></d:propfind>`;
       const response = await fetch('/api/nextcloud/proxy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -751,7 +683,8 @@ export default function App() {
           method: 'PROPFIND',
           username: creds.user,
           password: creds.pass,
-          headers: { 'Depth': '1' }
+          headers: { 'Depth': '1', 'Content-Type': 'application/xml' },
+          data: propfindBody
         })
       });
       if (!response.ok) throw new Error(`Fehler beim Laden der Ordner: ${response.status}`);
@@ -871,6 +804,7 @@ export default function App() {
     setEditTechCode(tech.code);
     setEditTechPass(tech.password || '');
     setEditTechNextcloudUser(tech.nextcloudUser || '');
+    setEditTechNextcloudPass(tech.nextcloudPass || '');
     setEditTechRole(tech.role);
   };
 
@@ -878,7 +812,7 @@ export default function App() {
     if (!editTechName || !editTechCode) return alert("Name und Kürzel sind Pflichtfelder.");
     const updatedTechs = config.technicians.map(t => 
         t.id === editingTechId 
-            ? { ...t, name: editTechName, code: editTechCode.toUpperCase(), password: editTechPass, nextcloudUser: editTechNextcloudUser, role: editTechRole } 
+            ? { ...t, name: editTechName, code: editTechCode.toUpperCase(), password: editTechPass, nextcloudUser: editTechNextcloudUser, nextcloudPass: editTechNextcloudPass, role: editTechRole } 
             : t
     );
     saveConfig({ ...config, technicians: updatedTechs });
@@ -1786,37 +1720,79 @@ export default function App() {
                                                 
                                                 try {
                                                     setStatus({ step: 'uploading', message: 'Teste Verbindung...' });
-                                                    const baseUrl = config.nextcloudUrl.replace(/\/$/, '');
-                                                    const variations = [baseUrl, `${baseUrl}/nextcloud`].filter(u => u);
-                                                    const users = [config.webdavUsername, user, user.toLowerCase(), user.replace(/\s+/g, '')].filter((u): u is string => !!u);
-                                                    const paths = ['/remote.php/dav/files/', '/remote.php/webdav/', '/index.php/remote.php/dav/files/'];
+                                                    const cleanUrl = config.nextcloudUrl.replace(/\/$/, '');
+                                                    const variations: string[] = [];
+                                                    
+                                                    // If the user entered a full WebDAV URL, try it first
+                                                    if (cleanUrl.includes('/remote.php/')) {
+                                                        variations.push(cleanUrl);
+                                                        variations.push(cleanUrl + '/');
+                                                    } else {
+                                                        // Standard variations
+                                                        const bases = [cleanUrl, `${cleanUrl}/nextcloud`].filter(u => u);
+                                                        const paths = ['/remote.php/dav/files/', '/remote.php/webdav/', '/index.php/remote.php/dav/files/'];
+                                                        const users = [
+                                                            config.webdavUsername, 
+                                                            user, 
+                                                            user.toLowerCase(), 
+                                                            user.replace(/\s+/g, ''), 
+                                                            user.includes('@') ? user : null,
+                                                            user.includes('@') ? user.split('@')[0] : null,
+                                                            user.replace(/\s+/g, '.').toLowerCase()
+                                                        ].filter((u): u is string => !!u);
+                                                        
+                                                        for (const b of bases) {
+                                                            for (const p of paths) {
+                                                                for (const u of users) {
+                                                                    variations.push(`${b}${p}${encodeURIComponent(u)}/`);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
                                                     
                                                     let log = "Verbindungs-Test Protokoll:\n";
                                                     let found = false;
+                                                    const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`;
                                                     
-                                                    for (const b of variations) {
-                                                        for (const p of paths) {
-                                                            for (const u of users) {
-                                                                const url = `${b}${p}${encodeURIComponent(u)}/`;
-                                                                log += `Prüfe: ${url} ... `;
-                                                                try {
-                                                                    const res = await fetch('/api/nextcloud/proxy', {
-                                                                        method: 'POST',
-                                                                        headers: { 'Content-Type': 'application/json' },
-                                                                        body: JSON.stringify({ url, method: 'PROPFIND', username: user, password: pass, headers: { 'Depth': '0' } })
-                                                                    });
-                                                                    log += `Status: ${res.status}\n`;
-                                                                    if (res.status === 207 || res.status === 200) {
-                                                                        found = true;
-                                                                        alert(`ERFOLG! Verbindung hergestellt.\nPfad: ${url}`);
-                                                                        saveConfig({ ...config, manualWebdavUrl: url });
-                                                                        break;
-                                                                    }
-                                                                } catch (e) {
-                                                                    log += `Fehler: ${e}\n`;
-                                                                }
+                                                    for (const url of variations) {
+                                                        log += `Prüfe: ${url} ... `;
+                                                        try {
+                                                            let res = await fetch('/api/nextcloud/proxy', {
+                                                                method: 'POST',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ 
+                                                                    url, 
+                                                                    method: 'PROPFIND', 
+                                                                    username: user, 
+                                                                    password: pass, 
+                                                                    headers: { 'Depth': '0', 'Content-Type': 'application/xml' },
+                                                                    data: propfindBody
+                                                                })
+                                                            });
+                                                            
+                                                            if (res.status === 405) {
+                                                                log += `(405 -> Versuche GET) `;
+                                                                res = await fetch('/api/nextcloud/proxy', {
+                                                                    method: 'POST',
+                                                                    headers: { 'Content-Type': 'application/json' },
+                                                                    body: JSON.stringify({ url, method: 'GET', username: user, password: pass })
+                                                                });
                                                             }
-                                                            if (found) break;
+                                                            
+                                                            log += `Status: ${res.status}\n`;
+                                                            
+                                                            if (res.status === 207 || res.status === 401) {
+                                                                found = true;
+                                                                if (res.status === 401) {
+                                                                    alert(`Pfad gefunden, aber Authentifizierung fehlgeschlagen (401).\nBitte prüfen Sie Ihr Passwort.\nPfad: ${url}`);
+                                                                } else {
+                                                                    alert(`ERFOLG! Verbindung hergestellt.\nPfad: ${url}`);
+                                                                }
+                                                                saveConfig({ ...config, manualWebdavUrl: url });
+                                                                break;
+                                                            }
+                                                        } catch (e) {
+                                                            log += `Fehler: ${e}\n`;
                                                         }
                                                         if (found) break;
                                                     }
@@ -1980,7 +1956,10 @@ export default function App() {
                                                 <input value={editTechCode} onChange={e => setEditTechCode(e.target.value)} className="w-full p-1 border rounded text-xs uppercase" placeholder="Kürzel" />
                                                 <input value={editTechPass} onChange={e => setEditTechPass(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Login-Passwort" />
                                             </div>
-                                            <input value={editTechNextcloudUser} onChange={e => setEditTechNextcloudUser(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Nextcloud Benutzername" />
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <input value={editTechNextcloudUser} onChange={e => setEditTechNextcloudUser(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Nextcloud Benutzername" />
+                                                <input value={editTechNextcloudPass} onChange={e => setEditTechNextcloudPass(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Nextcloud App-Passwort" />
+                                            </div>
                                             <div className="flex justify-between items-center pt-1">
                                                 <select value={editTechRole} onChange={e => setEditTechRole(e.target.value as any)} className="text-[10px] p-1 border rounded">
                                                     <option value="user">User</option>
@@ -2016,7 +1995,10 @@ export default function App() {
                                 <input placeholder="Kürzel" value={newTechCode} onChange={e => setNewTechCode(e.target.value)} className="w-full p-2 border rounded text-xs uppercase" />
                                 <input placeholder="Login-Passwort" value={newTechPass} onChange={e => setNewTechPass(e.target.value)} className="w-full p-2 border rounded text-xs" />
                             </div>
-                            <input placeholder="Nextcloud Benutzername (Optional)" value={newTechNextcloudUser} onChange={e => setNewTechNextcloudUser(e.target.value)} className="w-full p-2 border rounded text-xs mb-2 shadow-inner" />
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                                <input placeholder="Nextcloud Benutzername (Optional)" value={newTechNextcloudUser} onChange={e => setNewTechNextcloudUser(e.target.value)} className="w-full p-2 border rounded text-xs shadow-inner" />
+                                <input placeholder="Nextcloud App-Passwort (Optional)" value={newTechNextcloudPass} onChange={e => setNewTechNextcloudPass(e.target.value)} className="w-full p-2 border rounded text-xs shadow-inner" />
+                            </div>
                             <select value={newTechRole} onChange={e => setNewTechRole(e.target.value as any)} className="w-full p-2 border rounded text-xs bg-white mb-2 shadow-inner">
                                 <option value="user">Techniker (User)</option>
                                 <option value="admin">Administrator</option>
@@ -2029,9 +2011,10 @@ export default function App() {
                                     code: newTechCode.toUpperCase(), 
                                     password: newTechPass, 
                                     nextcloudUser: newTechNextcloudUser || newTechName,
+                                    nextcloudPass: newTechNextcloudPass,
                                     role: newTechRole 
                                 }]});
-                                setNewTechName(''); setNewTechCode(''); setNewTechPass(''); setNewTechNextcloudUser('');
+                                setNewTechName(''); setNewTechCode(''); setNewTechPass(''); setNewTechNextcloudUser(''); setNewTechNextcloudPass('');
                             }} variant="secondary" className="w-full py-1 text-xs">Techniker hinzufügen</Button>
                         </div>
                     </div>
