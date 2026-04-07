@@ -1862,9 +1862,34 @@ export default function App() {
                                                     let found = false;
                                                     const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`;
                                                     
+                                                    // 0. Check Server Status first
+                                                    try {
+                                                        const statusUrl = `${cleanUrl}/status.php`;
+                                                        log += `Prüfe Server-Status: ${statusUrl} ... `;
+                                                        const sRes = await fetch('/api/nextcloud/proxy', {
+                                                            method: 'POST',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({ url: statusUrl, method: 'GET' })
+                                                        });
+                                                        log += `Status: ${sRes.status}\n`;
+                                                        if (sRes.status !== 200) {
+                                                            log += "WARNUNG: Server scheint unter dieser URL kein Nextcloud-Server zu sein oder ist nicht erreichbar.\n";
+                                                        }
+                                                    } catch (e) {
+                                                        log += `Fehler beim Status-Check: ${e}\n`;
+                                                    }
+
                                                     for (const url of variations) {
                                                         log += `Prüfe: ${url} ... `;
                                                         try {
+                                                            // Try OPTIONS first to see what's allowed
+                                                            const optRes = await fetch('/api/nextcloud/proxy', {
+                                                                method: 'POST',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ url, method: 'OPTIONS', username: user, password: pass })
+                                                            });
+                                                            log += `(OPTIONS: ${optRes.status}) `;
+
                                                             let res = await fetch('/api/nextcloud/proxy', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
@@ -1879,7 +1904,7 @@ export default function App() {
                                                             });
                                                             
                                                             if (res.status === 405) {
-                                                                log += `(405 -> Versuche GET) `;
+                                                                log += `(PROPFIND 405 -> Versuche GET) `;
                                                                 res = await fetch('/api/nextcloud/proxy', {
                                                                     method: 'POST',
                                                                     headers: { 'Content-Type': 'application/json' },
