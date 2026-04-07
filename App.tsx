@@ -496,9 +496,10 @@ export default function App() {
         normalizedCode.replace(/\s+/g, ''), // Name without spaces
         normalizedCode.replace(/\s+/g, '.').toLowerCase(), // ronja.holdorf
         normalizedCode.replace(/\s+/g, '_'), // Name with underscores
+        normalizedCode.includes('@') ? normalizedCode.replace('@', '%40') : null, // Full email encoded
         'ronja.holdorf15@gmail.com',
         'ronja.holdorf15'
-      ];
+      ].filter((u): u is string => !!u);
       // Remove duplicates and empty strings, ensuring they are strings
       const uniqueUsers = Array.from(new Set(userInputs.filter((u): u is string => !!u)));
 
@@ -1667,22 +1668,63 @@ export default function App() {
                                         />
                                         <button 
                                             onClick={async () => {
+                                                if (!config.nextcloudUrl) return alert("Bitte URL eingeben");
+                                                const user = prompt("Benutzername für Test:");
+                                                const pass = prompt("App-Passwort für Test:");
+                                                if (!user || !pass) return;
+                                                
                                                 try {
-                                                    const url = (config.nextcloudUrl || '').replace(/\/index\.php\/?$/, '').replace(/\/$/, '');
-                                                    const response = await fetch(`${url}/status.php`);
-                                                    if (response.ok) {
-                                                        const data = await response.json();
-                                                        alert(`Verbindung erfolgreich!\nNextcloud Version: ${data.versionstring}`);
-                                                    } else {
-                                                        throw new Error();
+                                                    setStatus({ step: 'uploading', message: 'Teste Verbindung...' });
+                                                    const baseUrl = config.nextcloudUrl.replace(/\/$/, '');
+                                                    const variations = [baseUrl, `${baseUrl}/nextcloud`].filter(u => u);
+                                                    const users = [config.webdavUsername, user, user.toLowerCase(), user.replace(/\s+/g, '')].filter((u): u is string => !!u);
+                                                    const paths = ['/remote.php/dav/files/', '/remote.php/webdav/', '/index.php/remote.php/dav/files/'];
+                                                    
+                                                    let log = "Verbindungs-Test Protokoll:\n";
+                                                    let found = false;
+                                                    
+                                                    for (const b of variations) {
+                                                        for (const p of paths) {
+                                                            for (const u of users) {
+                                                                const url = `${b}${p}${encodeURIComponent(u)}/`;
+                                                                log += `Prüfe: ${url} ... `;
+                                                                try {
+                                                                    const res = await fetch('/api/nextcloud/proxy', {
+                                                                        method: 'POST',
+                                                                        headers: { 'Content-Type': 'application/json' },
+                                                                        body: JSON.stringify({ url, method: 'PROPFIND', username: user, password: pass, headers: { 'Depth': '0' } })
+                                                                    });
+                                                                    log += `Status: ${res.status}\n`;
+                                                                    if (res.status === 207 || res.status === 200) {
+                                                                        found = true;
+                                                                        alert(`ERFOLG! Verbindung hergestellt.\nPfad: ${url}`);
+                                                                        saveConfig({ ...config, manualWebdavUrl: url });
+                                                                        break;
+                                                                    }
+                                                                } catch (e) {
+                                                                    log += `Fehler: ${e}\n`;
+                                                                }
+                                                            }
+                                                            if (found) break;
+                                                        }
+                                                        if (found) break;
                                                     }
-                                                } catch (e) {
-                                                    alert("Verbindung fehlgeschlagen. Bitte URL prüfen.");
+                                                    
+                                                    if (!found) {
+                                                        console.log(log);
+                                                        alert("Verbindung fehlgeschlagen. Details in der Konsole (F12) oder kopieren Sie das Protokoll.");
+                                                        const copy = confirm("Möchten Sie das Test-Protokoll in die Zwischenablage kopieren?");
+                                                        if (copy) navigator.clipboard.writeText(log);
+                                                    }
+                                                } catch (err) {
+                                                    alert("Fehler beim Test: " + err);
+                                                } finally {
+                                                    setStatus({ step: 'login' });
                                                 }
                                             }}
                                             className="bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-blue-700 transition-colors"
                                         >
-                                            Test
+                                            Verbindung Testen
                                         </button>
                                     </div>
                                 </div>
