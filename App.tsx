@@ -1858,6 +1858,7 @@ export default function App() {
                                                     
                                                     let log = "Verbindungs-Test Protokoll:\n";
                                                     let found = false;
+                                                    const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`;
                                                     
                                                     for (const url of variations) {
                                                         try {
@@ -1869,7 +1870,11 @@ export default function App() {
                                                                     method: 'PROPFIND', 
                                                                     username: user, 
                                                                     password: pass, 
-                                                                    headers: { 'Depth': '0' } 
+                                                                    headers: { 
+                                                                        'Depth': '0',
+                                                                        'Content-Type': 'application/xml'
+                                                                    },
+                                                                    data: propfindBody
                                                                 })
                                                             });
                                                             
@@ -1888,7 +1893,11 @@ export default function App() {
                                                     
                                                     if (!found) {
                                                         console.log(log);
-                                                        alert("Verbindung fehlgeschlagen. Bitte prüfen Sie die Server-URL. Details wurden in der Konsole geloggt.");
+                                                        const copy = confirm("Verbindung fehlgeschlagen. Möchten Sie das detaillierte Fehler-Protokoll kopieren, um es dem Support zu schicken?");
+                                                        if (copy) {
+                                                            navigator.clipboard.writeText(log);
+                                                            alert("Protokoll kopiert!");
+                                                        }
                                                     }
                                                 } catch (err) {
                                                     alert("Fehler: " + err);
