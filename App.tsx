@@ -425,13 +425,17 @@ export default function App() {
           const basePath = hasFilesPart ? config.manualWebdavUrl.split('/files/')[0] + '/files/' : config.manualWebdavUrl;
           
           // Try variations for the current user based on the manual template
+          const manualUrl = config.manualWebdavUrl || "";
           const manualVariations = [
-              config.manualWebdavUrl, // 1. Exactly as entered
-              config.manualWebdavUrl.endsWith('/') ? config.manualWebdavUrl : config.manualWebdavUrl + '/', // Ensure trailing slash
-              `${basePath}${encodeURIComponent(normalizedCode)}/`, // 2. Base + Current User
-              `${basePath}${encodeURIComponent(normalizedCode.replace(/\s+/g, ''))}/`, // 3. Base + User (no spaces)
-              `${basePath}${encodeURIComponent(normalizedCode.replace(/\s+/g, '%20'))}/`, // 4. Base + User (manual spaces)
-              `${basePath}${encodeURIComponent(normalizedCode.split('@')[0])}/` // 5. Base + Email-Prefix
+              manualUrl, // 1. Exactly as entered
+              manualUrl.endsWith('/') ? manualUrl : manualUrl + '/', // Ensure trailing slash
+              manualUrl.replace(/\/$/, ''), // No trailing slash
+              config.webdavUsername ? `${basePath}${encodeURIComponent(config.webdavUsername)}/` : '', // 2. Explicit WebDAV User
+              `${basePath}${encodeURIComponent(normalizedCode)}/`, // 3. Base + Current User
+              `${basePath}${encodeURIComponent(normalizedCode.toLowerCase())}/`, // 4. Base + Lowercase User
+              `${basePath}${encodeURIComponent(normalizedCode.replace(/\s+/g, ''))}/`, // 5. Base + User (no spaces)
+              `${basePath}${encodeURIComponent(normalizedCode.replace(/\s+/g, '%20'))}/`, // 6. Base + User (manual spaces)
+              `${basePath}${encodeURIComponent(normalizedCode.split('@')[0])}/` // 7. Base + Email-Prefix
           ];
 
           // Filter duplicates and empty strings
@@ -485,7 +489,9 @@ export default function App() {
 
       // Username variations
       const userInputs = [
+        config.webdavUsername, // Try explicit WebDAV username first if provided
         normalizedCode,
+        normalizedCode.toLowerCase(), // ronja holdorf
         normalizedCode.split('@')[0], // Extract name if email was entered
         normalizedCode.replace(/\s+/g, ''), // Name without spaces
         normalizedCode.replace(/\s+/g, '.').toLowerCase(), // ronja.holdorf
@@ -493,8 +499,8 @@ export default function App() {
         'ronja.holdorf15@gmail.com',
         'ronja.holdorf15'
       ];
-      // Remove duplicates and empty strings
-      const uniqueUsers = Array.from(new Set(userInputs.filter(u => u)));
+      // Remove duplicates and empty strings, ensuring they are strings
+      const uniqueUsers = Array.from(new Set(userInputs.filter((u): u is string => !!u)));
 
       // Path variations
       const basePaths = [
@@ -1679,6 +1685,17 @@ export default function App() {
                                             Test
                                         </button>
                                     </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">WebDAV Benutzername (Optional)</label>
+                                    <input 
+                                        type="text" 
+                                        placeholder="z.B. u12345678 (siehe Mobil & Desktop)" 
+                                        value={config.webdavUsername || ''} 
+                                        onChange={e => saveConfig({ ...config, webdavUsername: e.target.value })} 
+                                        className="w-full p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
+                                    />
+                                    <p className="text-[9px] text-blue-400 ml-1">Nur nötig, wenn der WebDAV-Name von Ihrem Login-Namen abweicht.</p>
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Manueller WebDAV-Pfad (Optional)</label>

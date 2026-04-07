@@ -22,6 +22,7 @@ export interface AppConfig {
   logo?: string; // Base64 encoded custom logo
   nextcloudUrl?: string; // Base URL of the Nextcloud instance
   manualWebdavUrl?: string; // Manual override for WebDAV URL
+  webdavUsername?: string; // Explicit WebDAV username
 }
 
 export interface MaterialItem {
