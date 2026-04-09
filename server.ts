@@ -7,11 +7,17 @@ import axios from "axios";
 const app = express();
 const PORT = 3000;
 
+// Global identification header
+app.use((req, res, next) => {
+  res.setHeader('X-AIS-Server', 'Express-v1');
+  next();
+});
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // Nextcloud Proxy Routes to bypass CORS
-app.post('/api/nextcloud/proxy', async (req, res) => {
+app.post('/api/nc-bridge', async (req, res) => {
   const { url, method, username, password, data, headers: customHeaders } = req.body;
 
   if (!url) {
@@ -47,7 +53,6 @@ app.post('/api/nextcloud/proxy', async (req, res) => {
     console.log(`Proxy Request: ${axiosConfig.method} ${url} (User: ${username})`);
     const response = await axios(axiosConfig);
     console.log(`Proxy Response: ${response.status} for ${url}`);
-    console.log(`Proxy Response Headers:`, JSON.stringify(response.headers));
 
     // Forward relevant headers
     const headersToForward = ['content-type', 'allow', 'webdav', 'dav', 'x-nextcloud-version', 'server'];
@@ -57,14 +62,7 @@ app.post('/api/nextcloud/proxy', async (req, res) => {
       }
     });
     
-    // If it's an error, log the first bit of the body
-    if (response.status >= 400) {
-      const bodyPreview = Buffer.from(response.data).toString('utf8').substring(0, 200);
-      console.log(`Proxy Error [${response.status}] for ${url}: ${bodyPreview}`);
-      console.log(`Response Headers:`, response.headers);
-    }
-
-    // Forward relevant headers to client for debugging if needed
+    // Forward relevant headers to client for debugging
     res.setHeader('X-Proxy-Status', response.status);
     if (response.headers['server']) res.setHeader('X-Nextcloud-Server', response.headers['server']);
     
@@ -73,8 +71,13 @@ app.post('/api/nextcloud/proxy', async (req, res) => {
     const status = error.response?.status || 500;
     const errorData = error.response?.data ? Buffer.from(error.response.data).toString('utf8') : error.message;
     console.error('Nextcloud Proxy Fatal Error:', status, errorData);
+    res.setHeader('X-Proxy-Error', 'true');
     res.status(status).send(errorData);
   }
+});
+
+app.get('/api/nc-ping', (req, res) => {
+  res.json({ status: 'ok', server: 'AIS-Express' });
 });
 
 // Vite Middleware für die Frontend-Dateien
