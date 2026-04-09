@@ -23,13 +23,11 @@ app.post('/api/nextcloud/proxy', async (req, res) => {
       url,
       method: method || 'GET',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/xml, text/plain, */*',
+        'User-Agent': 'Nextcloud-android/3.28.1',
+        'Accept': '*/*',
         'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
-        'X-Requested-With': 'XMLHttpRequest',
-        'X-NC-Apps-Version': '1.0.0',
         ...(authHeader ? { 'Authorization': authHeader } : {}),
         ...customHeaders
       },
@@ -47,18 +45,27 @@ app.post('/api/nextcloud/proxy', async (req, res) => {
     console.log(`Proxy Request: ${axiosConfig.method} ${url} (User: ${username})`);
     const response = await axios(axiosConfig);
     console.log(`Proxy Response: ${response.status} for ${url}`);
+    console.log(`Proxy Response Headers:`, JSON.stringify(response.headers));
 
     // Forward relevant headers
-    if (response.headers['content-type']) {
-      res.setHeader('Content-Type', response.headers['content-type']);
-    }
+    const headersToForward = ['content-type', 'allow', 'webdav', 'dav', 'x-nextcloud-version', 'server'];
+    headersToForward.forEach(h => {
+      if (response.headers[h]) {
+        res.setHeader(h, response.headers[h]);
+      }
+    });
     
     // If it's an error, log the first bit of the body
     if (response.status >= 400) {
       const bodyPreview = Buffer.from(response.data).toString('utf8').substring(0, 200);
       console.log(`Proxy Error [${response.status}] for ${url}: ${bodyPreview}`);
+      console.log(`Response Headers:`, response.headers);
     }
 
+    // Forward relevant headers to client for debugging if needed
+    res.setHeader('X-Proxy-Status', response.status);
+    if (response.headers['server']) res.setHeader('X-Nextcloud-Server', response.headers['server']);
+    
     res.status(response.status).send(response.data);
   } catch (error: any) {
     const status = error.response?.status || 500;

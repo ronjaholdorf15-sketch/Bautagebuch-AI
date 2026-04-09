@@ -1,0 +1,1 @@
+1944:                                                            log += `Status: ${sRes.status} (${sText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} ${ncVersion ? `[NC: ${ncVersion}]` : ''}\n`;

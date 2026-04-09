@@ -1932,15 +1932,18 @@ export default function App() {
                                                     
                                                     for (const sUrl of statusUrls) {
                                                         try {
+                                                            await new Promise(r => setTimeout(r, 200));
                                                             log += `Prüfe Server-Status: ${sUrl} ... `;
                                                             const sRes = await fetch('/api/nextcloud/proxy', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({ url: sUrl, method: 'GET', username: user, password: pass })
+                                                                body: JSON.stringify({ url: sUrl, method: 'GET' })
                                                             });
                                                             const sText = await sRes.text();
-                                                            log += `Status: ${sRes.status} (${sText.substring(0, 20)})\n`;
-                                                            if (sRes.status === 200 && sText.includes('version')) {
+                                                            const allowHeader = sRes.headers.get('allow');
+                                                            const ncVersion = sRes.headers.get('x-nextcloud-version');
+                                                            log += `Status: ${sRes.status} (${sText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} ${ncVersion ? `[NC: ${ncVersion}]` : ''}\n`;
+                                                            if (sRes.status === 200 && (sText.includes('version') || ncVersion)) {
                                                                 log += "ERFOLG: Nextcloud-Server unter dieser URL bestätigt!\n";
                                                                 break;
                                                             }
@@ -1984,7 +1987,8 @@ export default function App() {
                                                             }
                                                             
                                                             const resText = await res.text();
-                                                            log += `Status: ${res.status} (${resText.substring(0, 20)})\n`;
+                                                            const allowHeader = res.headers.get('allow');
+                                                            log += `Status: ${res.status} (${resText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''}\n`;
                                                             
                                                             if (res.status === 207 || res.status === 401 || (res.status === 200 && (url.includes('remote.php') || resText.includes('Nextcloud')))) {
                                                                 found = true;
