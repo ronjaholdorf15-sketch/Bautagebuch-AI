@@ -4,38 +4,32 @@ import cors from "cors";
 import path from "path";
 import axios from "axios";
 
-// AIS Nextcloud Bridge Server v6
-// This server handles API requests and proxies them to Nextcloud.
+// AIS Nextcloud Bridge Server v7
+// Minimalist approach to bypass all routing issues.
 
 const app = express();
 const PORT = 3000;
 
-// 1. Identification Middleware
-app.use((req, res, next) => {
-  console.log(`[AIS-SERVER] ${req.method} ${req.url}`);
-  res.setHeader('X-AIS-Server', 'Express-v6-Final');
-  res.setHeader('X-AIS-Timestamp', new Date().toISOString());
-  next();
-});
-
+// 1. Basic Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-// 2. API Routes (Explicitly under /api)
-const api = express.Router();
-
-api.get('/ping', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    version: '6.0.0',
-    node: process.version,
-    time: new Date().toISOString()
-  });
+// 2. API Routes - DEFINED FIRST AND AT THE TOP LEVEL
+// We use a very specific path to avoid any SPA rewrites
+app.get('/ais-v7-ping', (req, res) => {
+  console.log('[AIS] Ping V7');
+  res.setHeader('X-AIS-Server', 'Express-v7-Final');
+  res.setHeader('X-AIS-Timestamp', new Date().toISOString());
+  res.json({ status: 'ok', version: '7.0.0' });
 });
 
-api.post('/bridge', async (req, res) => {
+app.post('/ais-v7-bridge', async (req, res) => {
   const { url, method, username, password, data, headers: customHeaders } = req.body;
   
+  console.log(`[AIS] Bridge V7: ${method} -> ${url}`);
+  res.setHeader('X-AIS-Server', 'Express-v7-Final');
+  res.setHeader('X-AIS-Timestamp', new Date().toISOString());
+
   if (!url) return res.status(400).send('Missing URL');
 
   try {
@@ -64,9 +58,8 @@ api.post('/bridge', async (req, res) => {
         : data;
     }
 
-    console.log(`[PROXY] ${axiosConfig.method} -> ${url}`);
     const response = await axios(axiosConfig);
-    console.log(`[PROXY] Response: ${response.status}`);
+    console.log(`[AIS] Target Response: ${response.status}`);
 
     // Forward headers
     const headersToForward = ['content-type', 'allow', 'webdav', 'dav', 'x-nextcloud-version', 'server'];
@@ -77,18 +70,14 @@ api.post('/bridge', async (req, res) => {
     });
     
     res.setHeader('X-Proxy-Status', response.status);
-    if (response.headers['server']) res.setHeader('X-Nextcloud-Server', response.headers['server']);
-    
     res.status(response.status).send(response.data);
   } catch (error: any) {
-    console.error('[PROXY] Error:', error.message);
+    console.error('[AIS] Bridge Error:', error.message);
     res.status(500).send(error.message);
   }
 });
 
-app.use('/api', api);
-
-// 3. Frontend / Static Files
+// 3. Frontend / Static Files - DEFINED AFTER API
 async function start() {
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
@@ -106,10 +95,10 @@ async function start() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[READY] AIS Server v6 listening on port ${PORT}`);
+    console.log(`[READY] AIS Server v7 on port ${PORT}`);
   });
 }
 
 start().catch(err => {
-  console.error('[FATAL] Server failed to start:', err);
+  console.error('[FATAL] Server failed:', err);
 });
