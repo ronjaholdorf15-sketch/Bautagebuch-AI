@@ -206,6 +206,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<Technician | null>(null);
   const [loginCode, setLoginCode] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [loginServerUrl, setLoginServerUrl] = useState(config.nextcloudUrl || 'https://nextcloud.it-kom.de');
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [status, setStatus] = useState<FormStatus>({ step: 'login' });
@@ -253,7 +254,14 @@ export default function App() {
   const [isEnhancingText, setIsEnhancingText] = useState(false);
   const [isGeneratingMissing, setIsGeneratingMissing] = useState(false);
   const [isGeneratingPdfOnly, setIsGeneratingPdfOnly] = useState(false);
-  const [nextcloudCreds, setNextcloudCreds] = useState<{ user: string, pass: string, webdavUrl: string } | null>(null);
+  const [nextcloudCreds, setNextcloudCreds] = useState<{ user: string, pass: string, webdavUrl: string } | null>(() => {
+    const saved = localStorage.getItem('itkom_nc_creds');
+    try {
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
   
   // Folder Browsing States
   const [isBrowsingFolders, setIsBrowsingFolders] = useState(false);
@@ -411,10 +419,16 @@ export default function App() {
     
     const normalizedCode = loginCode.trim();
     const normalizedPassword = loginPassword.trim();
+    const normalizedUrl = loginServerUrl.trim();
 
-    if (!normalizedCode || !normalizedPassword) {
-        setStatus({ step: 'error', error: "Bitte Benutzername und Passwort eingeben." });
+    if (!normalizedCode || !normalizedPassword || !normalizedUrl) {
+        setStatus({ step: 'error', error: "Bitte Server-URL, Benutzername und Passwort eingeben." });
         return;
+    }
+
+    // Save the URL to config for next time
+    if (normalizedUrl !== config.nextcloudUrl) {
+        saveConfig({ ...config, nextcloudUrl: normalizedUrl });
     }
 
     // 0. Master Admin Override (Local fallback for initial setup)
@@ -453,8 +467,10 @@ export default function App() {
         const ncPass = storedTech.nextcloudPass || normalizedPassword;
 
         try {
-            const webdavUrl = await discoverWebdavUrl(ncUser, ncPass);
-            setNextcloudCreds({ user: ncUser, pass: ncPass, webdavUrl });
+            const webdavUrl = await discoverWebdavUrl(ncUser, ncPass, normalizedUrl);
+            const creds = { user: ncUser, pass: ncPass, webdavUrl };
+            setNextcloudCreds(creds);
+            localStorage.setItem('itkom_nc_creds', JSON.stringify(creds));
             await performFirebaseLogin(storedTech);
             return;
         } catch (err: any) {
@@ -474,8 +490,10 @@ export default function App() {
     setUploadMessage("Verbinde mit Nextcloud...");
     
     try {
-        const webdavUrl = await discoverWebdavUrl(normalizedCode, normalizedPassword);
-        setNextcloudCreds({ user: normalizedCode, pass: normalizedPassword, webdavUrl });
+        const webdavUrl = await discoverWebdavUrl(normalizedCode, normalizedPassword, normalizedUrl);
+        const creds = { user: normalizedCode, pass: normalizedPassword, webdavUrl };
+        setNextcloudCreds(creds);
+        localStorage.setItem('itkom_nc_creds', JSON.stringify(creds));
         
         // Create a temporary technician object
         const tech: Technician = {
@@ -519,9 +537,9 @@ export default function App() {
     });
   };
 
-  const discoverWebdavUrl = async (user: string, pass: string): Promise<string> => {
-    // 1. Use the configured base URL
-    const rawUrl = (config.nextcloudUrl || 'https://nextcloud.it-kom.de').trim();
+  const discoverWebdavUrl = async (user: string, pass: string, customBaseUrl?: string): Promise<string> => {
+    // 1. Use the provided or configured base URL
+    const rawUrl = (customBaseUrl || config.nextcloudUrl || 'https://nextcloud.it-kom.de').trim();
     let baseUrl = rawUrl;
     if (rawUrl.includes('/remote.php')) baseUrl = rawUrl.split('/remote.php')[0];
     else if (rawUrl.includes('/index.php')) baseUrl = rawUrl.split('/index.php')[0];
@@ -765,6 +783,8 @@ export default function App() {
   const handleLogout = async () => { 
     await signOut(auth);
     setCurrentUser(null); 
+    setNextcloudCreds(null);
+    localStorage.removeItem('itkom_nc_creds');
     setStatus({ step: 'login' }); 
     setShowSettings(false); 
     setLoginCode(''); 
@@ -1249,12 +1269,6 @@ export default function App() {
                   <div className="text-center mb-10">
                     <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Anmelden</h2>
                     <p className="text-sm text-slate-400 font-medium mt-2">Willkommen zurück im Bautagebuch</p>
-                    {config.nextcloudUrl && (
-                        <div className="mt-4 flex items-center justify-center gap-1.5 bg-green-50 px-3 py-1.5 rounded-full border border-green-100 w-fit mx-auto">
-                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                            <span className="text-[10px] font-black text-green-600 uppercase tracking-widest">Server Bereit</span>
-                        </div>
-                    )}
                   </div>
                   <form onSubmit={handleLogin} className="space-y-6">
                       {status.step === 'error' && (
@@ -1285,8 +1299,20 @@ export default function App() {
                             </button>
                         </div>
                       )}
+
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Techniker auswählen oder eingeben</label>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Nextcloud Server URL</label>
+                        <input 
+                          type="url" 
+                          value={loginServerUrl} 
+                          onChange={e => setLoginServerUrl(e.target.value)} 
+                          placeholder="https://nextcloud.it-kom.de" 
+                          className="w-full text-center text-sm p-4 border border-slate-200 rounded-2xl outline-none input-focus bg-slate-50/50" 
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Benutzername</label>
                         
                         {config.technicians.length > 0 && (
                           <div className="grid grid-cols-2 gap-2 mb-4">
@@ -1796,473 +1822,185 @@ export default function App() {
                 </div>
                 
                 <div className="mt-6">
-                        <div className="grid lg:grid-cols-3 gap-8">
-                    {/* Firmenlogo & Backup */}
-                    <div className="space-y-6">
-                        <div className="space-y-4">
-                            <h4 className="text-xs font-bold uppercase text-brand-primary">Logo & Design</h4>
-                            <div className="bg-gray-50 p-6 rounded-xl border text-center">
-                                <div className="flex justify-center mb-6 bg-white p-4 rounded-lg border border-dashed items-center min-h-[120px]">
-                                    <Logo className="h-20 w-auto" src={config.logo} />
-                                </div>
-                                <label className="block w-full py-2 px-4 bg-brand-primary text-white rounded-lg cursor-pointer hover:bg-brand-primary/90 text-sm font-bold mb-2">
-                                    Neues Logo hochladen
-                                    <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
-                                </label>
-                                {config.logo && (
-                                    <button onClick={() => saveConfig({ ...config, logo: undefined })} className="text-[10px] text-red-500 font-bold uppercase tracking-wider">Logo zurücksetzen</button>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="space-y-4 border-t pt-4">
-                            <h4 className="text-xs font-bold uppercase text-brand-600">Nextcloud Integration</h4>
-                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-3">
-                                <p className="text-[11px] text-blue-700 leading-relaxed">Geben Sie die Basis-URL Ihrer Nextcloud-Instanz an.</p>
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Nextcloud Server-Adresse (Basis)</label>
-                                    <div className="flex gap-2">
-                                        <input 
-                                            type="url" 
-                                            placeholder="https://nextcloud.it-kom.de" 
-                                            value={config.nextcloudUrl || ''} 
-                                            onChange={e => saveConfig({ ...config, nextcloudUrl: e.target.value })} 
-                                            className="flex-1 p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
-                                        />
-                                        <button 
-                                            onClick={() => {
-                                                const fullUrl = prompt("Kopieren Sie die WebDAV-Adresse aus Nextcloud (unten links bei Dateien -> Einstellungen) hier hinein:");
-                                                if (!fullUrl) return;
-                                                
-                                                try {
-                                                    const url = new URL(fullUrl);
-                                                    const baseUrl = `${url.protocol}//${url.host}`;
-                                                    saveConfig({ ...config, nextcloudUrl: baseUrl, manualWebdavUrl: fullUrl });
-                                                    
-                                                    // Extract username from /files/USERNAME/
-                                                    const match = fullUrl.match(/\/files\/([^/]+)\/?/);
-                                                    if (match && match[1]) {
-                                                        const extractedUser = decodeURIComponent(match[1]);
-                                                        alert(`Erfolg! \nServer: ${baseUrl}\nBenutzername erkannt: ${extractedUser}\n\nBitte geben Sie jetzt noch Ihr App-Passwort beim Login ein.`);
-                                                    } else {
-                                                        alert(`Server erkannt: ${baseUrl}\nDer Benutzername konnte nicht automatisch aus dem Pfad gelesen werden, aber der Pfad wurde gespeichert.`);
-                                                    }
-                                                } catch (e) {
-                                                    alert("Ungültige URL. Bitte kopieren Sie die komplette Adresse.");
-                                                }
-                                            }}
-                                            className="bg-blue-100 text-blue-600 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-blue-200 transition-colors"
-                                            title="URL aus Nextcloud kopieren"
-                                        >
-                                            URL-Assistent
-                                        </button>
+                    <div className="grid lg:grid-cols-3 gap-8">
+                        {/* Spalte 1: Design & System */}
+                        <div className="space-y-6">
+                            <div className="space-y-4">
+                                <h4 className="text-xs font-bold uppercase text-brand-primary">Logo & Design</h4>
+                                <div className="bg-gray-50 p-6 rounded-xl border text-center">
+                                    <div className="flex justify-center mb-6 bg-white p-4 rounded-lg border border-dashed items-center min-h-[120px]">
+                                        <Logo className="h-20 w-auto" src={config.logo} />
                                     </div>
-                                    <p className="text-[9px] text-blue-400 ml-1">Die Basis-URL Ihres Nextcloud-Servers.</p>
-                                </div>
-
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Manueller WebDAV-Pfad (für Experten)</label>
-                                    <div className="flex gap-2">
-                                        <input 
-                                            type="text" 
-                                            placeholder="Wird automatisch vom Assistenten ausgefüllt" 
-                                            value={config.manualWebdavUrl || ''} 
-                                            onChange={e => saveConfig({ ...config, manualWebdavUrl: e.target.value })} 
-                                            className="flex-1 p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
-                                        />
-                                        <button 
-                                            onClick={async () => {
-                                                if (!config.nextcloudUrl) return alert("Bitte URL eingeben");
-                                                const user = prompt("Benutzername für Test:");
-                                                const pass = prompt("App-Passwort für Test:");
-                                                if (!user || !pass) return;
-                                                
-                                                try {
-                                                    setStatus({ step: 'uploading' });
-                                                    setUploadMessage('Teste Verbindung...');
-                                                    
-                                                    const cleanUrl = config.nextcloudUrl.trim().replace(/\/$/, '');
-                                                    let variations: string[] = [];
-                                                    
-                                                    // 1. If it's already a full WebDAV URL, try it first
-                                                    if (config.manualWebdavUrl) {
-                                                        variations.push(config.manualWebdavUrl);
-                                                        if (!config.manualWebdavUrl.endsWith('/')) variations.push(config.manualWebdavUrl + '/');
-                                                    }
-                                                    
-                                                    // 2. Add standard variations
-                                                    const bases = [cleanUrl, `${cleanUrl}/nextcloud`].filter(u => u);
-                                                    const paths = [
-                                                        '/remote.php/dav/files/', 
-                                                        '/remote.php/webdav/', 
-                                                        '/index.php/remote.php/dav/files/',
-                                                        '/remote.php/dav/',
-                                                        '/dav/files/'
-                                                    ];
-                                                    const users = [
-                                                        user, 
-                                                        user.toLowerCase(), 
-                                                        user.replace(/\s+/g, ''),
-                                                        user.split('@')[0],
-                                                        user.replace(/\s+/g, '.').toLowerCase(),
-                                                        ''
-                                                    ].filter((u): u is string => u !== null);
-                                                    
-                                                    for (const b of bases) {
-                                                        for (const p of paths) {
-                                                            for (const u of users) {
-                                                                variations.push(`${b}${p}${encodeURIComponent(u)}/`);
-                                                            }
-                                                        }
-                                                    }
-                                                    
-                                                    variations = Array.from(new Set(variations));
-                                                    
-                                                    let log = "Verbindungs-Test Protokoll:\n";
-                                                    
-                                                    try {
-                                                        log += "--- DIAGNOSE START ---\n";
-                                                        log += "Prüfe AIS-Server Erreichbarkeit... ";
-                                                        const pingRes = await fetch('/ais-v8-ping');
-                                                        const aisServer = pingRes.headers.get('X-AIS-Server');
-                                                        const aisTime = pingRes.headers.get('X-AIS-Timestamp');
-                                                        log += `Status: ${pingRes.status} [AIS: ${aisServer || '?'}] [Time: ${aisTime || '?'}]\n`;
-                                                        
-                                                        if (pingRes.status === 200) {
-                                                            try {
-                                                                const pingData = await pingRes.json();
-                                                                log += `Server-Info: v${pingData.version} (Env: ${pingData.env})\n`;
-                                                            } catch (e) {
-                                                                log += `HINWEIS: Antwort ist kein JSON (evtl. SPA-Fallback).\n`;
-                                                            }
-                                                        }
-                                                        if (aisServer !== 'Express-v8-Final') {
-                                                            log += "WARNUNG: Anfragen werden eventuell abgefangen (Server-Header fehlt).\n";
-                                                        }
-                                                    } catch (e) {
-                                                        log += `FEHLER beim AIS-Ping: ${e instanceof Error ? e.message : String(e)}\n`;
-                                                    }
-
-                                                    let found = false;
-                                                    const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`;
-                                                    
-                                                    // 0. Check Server Status first
-                                                    const statusUrls = [
-                                                        `${cleanUrl}/status.php`,
-                                                        `${cleanUrl}/index.php/status.php`,
-                                                        `${cleanUrl}/nextcloud/status.php`,
-                                                        `${cleanUrl}/nextcloud/index.php/status.php`
-                                                    ];
-                                                    
-                                                    for (const sUrl of statusUrls) {
-                                                        try {
-                                                            await new Promise(r => setTimeout(r, 200));
-                                                            log += `Prüfe Server-Status: ${sUrl} ... `;
-                                                            const sRes = await fetch('/ais-v8-bridge', {
-                                                                method: 'POST',
-                                                                headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({ url: sUrl, method: 'GET' })
-                                                            });
-                                                            const sText = await sRes.text();
-                                                            const allowHeader = sRes.headers.get('allow');
-                                                            const ncVersion = sRes.headers.get('x-nextcloud-version');
-                                                            const proxyStatus = sRes.headers.get('X-Proxy-Status');
-                                                            const ncServer = sRes.headers.get('X-Nextcloud-Server') || sRes.headers.get('server');
-                                                            const aisHeader = sRes.headers.get('X-AIS-Server');
-                                                            const aisTime = sRes.headers.get('X-AIS-Timestamp');
-                                                            log += `Status: ${sRes.status} (Proxy: ${proxyStatus || '?'}) [AIS: ${aisHeader || '?'}] [Time: ${aisTime || '?'}] (${sText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} ${ncVersion ? `[NC: ${ncVersion}]` : ''} [Server: ${ncServer || '?'}]\n`;
-                                                            if (sRes.status === 200 && (sText.includes('version') || ncVersion)) {
-                                                                log += "ERFOLG: Nextcloud-Server unter dieser URL bestätigt!\n";
-                                                                break;
-                                                            }
-                                                        } catch (e) {
-                                                            log += `Fehler beim Status-Check: ${e}\n`;
-                                                        }
-                                                    }
-
-                                                    for (const url of variations) {
-                                                        log += `Prüfe: ${url} ... `;
-                                                        try {
-                                                            // Try OPTIONS first
-                                                            const optRes = await fetch('/ais-v8-bridge', {
-                                                                method: 'POST',
-                                                                headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({ url, method: 'OPTIONS', username: user, password: pass })
-                                                            });
-                                                            const optText = await optRes.text();
-                                                            log += `(OPTIONS: ${optRes.status}) `;
-
-                                                            let res = await fetch('/ais-v8-bridge', {
-                                                                method: 'POST',
-                                                                headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({ 
-                                                                    url, 
-                                                                    method: 'PROPFIND', 
-                                                                    username: user, 
-                                                                    password: pass, 
-                                                                    headers: { 'Depth': '0', 'Content-Type': 'application/xml' },
-                                                                    data: propfindBody
-                                                                })
-                                                            });
-                                                            
-                                                            if (res.status === 405) {
-                                                                log += `(PROPFIND 405 -> Versuche GET) `;
-                                                                res = await fetch('/ais-v8-bridge', {
-                                                                    method: 'POST',
-                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                    body: JSON.stringify({ url, method: 'GET', username: user, password: pass })
-                                                                });
-                                                            }
-                                                            
-                                                            const resText = await res.text();
-                                                            const allowHeader = res.headers.get('allow');
-                                                            const proxyStatus = res.headers.get('X-Proxy-Status');
-                                                            const ncServer = res.headers.get('X-Nextcloud-Server') || res.headers.get('server');
-                                                            const aisHeader = res.headers.get('X-AIS-Server');
-                                                            const aisTime = res.headers.get('X-AIS-Timestamp');
-                                                            log += `Status: ${res.status} (Proxy: ${proxyStatus || '?'}) [AIS: ${aisHeader || '?'}] [Time: ${aisTime || '?'}] (${resText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} [Server: ${ncServer || '?'}]\n`;
-                                                            
-                                                            if (res.status === 207 || res.status === 401 || (res.status === 200 && (url.includes('remote.php') || resText.includes('Nextcloud')))) {
-                                                                found = true;
-                                                                if (res.status === 401) {
-                                                                    alert(`Pfad gefunden, aber Authentifizierung fehlgeschlagen (401).\nBitte prüfen Sie Ihr Passwort.\nPfad: ${url}`);
-                                                                } else {
-                                                                    alert(`ERFOLG! Verbindung hergestellt.\nPfad: ${url}`);
-                                                                }
-                                                                saveConfig({ ...config, manualWebdavUrl: url });
-                                                                break;
-                                                            }
-                                                        } catch (e) {
-                                                            log += `Fehler: ${e}\n`;
-                                                        }
-                                                        if (found) break;
-                                                    }
-                                                    
-                                                    if (!found) {
-                                                        console.log(log);
-                                                        const copy = confirm("Verbindung fehlgeschlagen. Möchten Sie das detaillierte Fehler-Protokoll kopieren?");
-                                                        if (copy) {
-                                                            navigator.clipboard.writeText(log);
-                                                            alert("Protokoll kopiert!");
-                                                        }
-                                                    }
-                                                } catch (err) {
-                                                    alert("Fehler: " + err);
-                                                } finally {
-                                                    setStatus({ step: 'login' });
-                                                }
-                                            }}
-                                            className="bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-blue-700 transition-colors"
-                                        >
-                                            Testen
-                                        </button>
-                                    </div>
-                                    <p className="text-[9px] text-blue-400 ml-1">Hier wird der exakte WebDAV-Pfad gespeichert, den der Assistent ermittelt hat.</p>
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">WebDAV Benutzername (Optional)</label>
-                                    <input 
-                                        type="text" 
-                                        placeholder="z.B. u12345678 (siehe Mobil & Desktop)" 
-                                        value={config.webdavUsername || ''} 
-                                        onChange={e => saveConfig({ ...config, webdavUsername: e.target.value })} 
-                                        className="w-full p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
-                                    />
-                                    <p className="text-[9px] text-blue-400 ml-1">Die Basis-URL Ihres Nextcloud-Servers (wird für alle Benutzer verwendet).</p>
-                                </div>
-
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Zielordner für Uploads</label>
-                                    <div className="flex gap-2">
-                                        <input 
-                                            type="text" 
-                                            readOnly
-                                            placeholder="/Bautagebuch" 
-                                            value={config.defaultUploadFolder || '/Bautagebuch'} 
-                                            className="flex-1 p-3 text-xs border border-blue-200 rounded-xl outline-none bg-gray-50" 
-                                        />
-                                        <button 
-                                            onClick={() => {
-                                                if (!nextcloudCreds) {
-                                                    alert("Bitte zuerst die Verbindung testen oder sich einloggen.");
-                                                    return;
-                                                }
-                                                handleBrowseFolders();
-                                            }}
-                                            className="bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-blue-700 transition-colors"
-                                        >
-                                            Durchsuchen
-                                        </button>
-                                    </div>
-                                    <p className="text-[9px] text-blue-400 ml-1">Wählen Sie den Ordner in Ihrer Nextcloud aus, in dem die Berichte gespeichert werden sollen.</p>
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-blue-400 uppercase tracking-widest ml-1">Manueller WebDAV-Pfad (Optional)</label>
-                                    <input 
-                                        type="url" 
-                                        placeholder="https://.../remote.php/dav/files/user/" 
-                                        value={config.manualWebdavUrl || ''} 
-                                        onChange={e => saveConfig({ ...config, manualWebdavUrl: e.target.value })} 
-                                        className="w-full p-3 text-xs border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 bg-white" 
-                                    />
-                                    <p className="text-[9px] text-blue-400 ml-1">Nur nötig, wenn der automatische Login fehlschlägt. Kopieren Sie den Link aus den Nextcloud-Einstellungen (unten links bei Dateien).</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="space-y-4 border-t pt-4">
-                            <h4 className="text-xs font-bold uppercase text-brand-600">Backup & Sicherheit</h4>
-                            <div className="bg-slate-100 p-4 rounded-xl border space-y-3">
-                                <p className="text-[11px] text-gray-500 leading-relaxed">Sichern Sie Ihre Konfiguration regelmäßig, um Datenverlust bei Browser-Wechsel zu vermeiden.</p>
-                                <Button onClick={handleExportConfig} variant="outline" className="w-full text-xs py-2">
-                                    <BackupIcon /> Konfiguration exportieren
-                                </Button>
-                                <label className="block w-full py-2 px-4 bg-white border border-gray-300 text-gray-700 rounded-md cursor-pointer hover:bg-gray-50 text-center text-xs font-medium">
-                                    Backup importieren
-                                    <input type="file" ref={importFileRef} accept=".json" onChange={handleImportConfig} className="hidden" />
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Einsatzgebiete */}
-                    <div className="space-y-4">
-                        <h4 className="text-xs font-bold uppercase text-brand-primary">Einsatzgebiete / Projekte</h4>
-                        <div className="space-y-2 mb-4 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
-                            {config.projects.length === 0 && <p className="text-xs text-gray-400 text-center py-4">Keine Einsatzgebiete angelegt.</p>}
-                            {config.projects.map(p => (
-                                <div key={p.token} className="flex flex-col p-2 bg-white rounded border text-sm shadow-sm gap-2">
-                                    <div className="flex justify-between items-center">
-                                        <div className="flex-1">
-                                            <span className="font-medium truncate">{p.name}</span>
-                                            <p className="text-[10px] text-slate-400">Pfad: {p.nextcloudPath || '/Bautagebuch'}</p>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button 
-                                                onClick={() => {
-                                                    if (!nextcloudCreds) return alert("Bitte zuerst einloggen oder Verbindung testen.");
-                                                    setBrowseCallback(() => (selectedPath: string) => {
-                                                        const updatedProjects = config.projects.map(pr => 
-                                                            pr.token === p.token ? { ...pr, nextcloudPath: selectedPath } : pr
-                                                        );
-                                                        saveConfig({ ...config, projects: updatedProjects });
-                                                    });
-                                                    handleBrowseFolders();
-                                                }}
-                                                className="text-blue-500 p-1 hover:bg-blue-50 rounded"
-                                                title="Ordner auswählen"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
-                                            </button>
-                                            <button onClick={() => { if(confirm("Einsatzgebiet löschen?")) saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)}) }} className="text-red-400 p-1"><TrashIcon /></button>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                        <div className="space-y-2 bg-white p-3 rounded-lg border shadow-sm">
-                            <input placeholder="Name des Einsatzgebiets" value={newProjName} onChange={e => setNewProjName(e.target.value)} className="w-full p-2 border rounded text-sm" />
-                            <div className="flex gap-2">
-                                <input placeholder="Nextcloud Pfad (z.B. /Projekte/Berlin)" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="flex-1 p-2 border rounded text-sm" />
-                                <button 
-                                    onClick={() => {
-                                        if (!nextcloudCreds) return alert("Bitte zuerst einloggen oder Verbindung testen.");
-                                        setBrowseCallback(() => (selectedPath: string) => {
-                                            setNewProjLink(selectedPath);
-                                        });
-                                        handleBrowseFolders();
-                                    }}
-                                    className="bg-blue-100 text-blue-600 px-3 rounded-lg text-[10px] font-bold uppercase"
-                                >
-                                    Wählen
-                                </button>
-                            </div>
-                            <Button onClick={() => {
-                                if (!newProjName) return alert("Bitte Namen eingeben.");
-                                const token = Math.random().toString(36).substr(2, 9);
-                                saveConfig({...config, projects: [...config.projects, { name: newProjName, link: '', token, nextcloudPath: newProjLink || '/Bautagebuch' }]});
-                                setNewProjName('');
-                                setNewProjLink('');
-                            }} className="w-full">Hinzufügen</Button>
-                        </div>
-                    </div>
-
-                    {/* Technikerverwaltung */}
-                    <div className="space-y-4">
-                        <h4 className="text-xs font-bold uppercase text-brand-primary">Techniker & Passwörter</h4>
-                        <div className="space-y-2 mb-4 max-h-64 overflow-y-auto border rounded-lg p-2 bg-gray-50">
-                            {config.technicians.map(t => (
-                                <div key={t.id} className={`flex flex-col p-2 bg-white rounded border text-sm shadow-sm ${editingTechId === t.id ? 'border-brand-500 bg-brand-50' : 'border-gray-100'}`}>
-                                    {editingTechId === t.id ? (
-                                        <div className="space-y-2">
-                                            <input value={editTechName} onChange={e => setEditTechName(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Name" />
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <input value={editTechCode} onChange={e => setEditTechCode(e.target.value)} className="w-full p-1 border rounded text-xs uppercase" placeholder="Kürzel" />
-                                                <input value={editTechPass} onChange={e => setEditTechPass(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Login-Passwort" />
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <input value={editTechNextcloudUser} onChange={e => setEditTechNextcloudUser(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Nextcloud Benutzername" />
-                                                <input value={editTechNextcloudPass} onChange={e => setEditTechNextcloudPass(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Nextcloud App-Passwort" />
-                                            </div>
-                                            <div className="flex justify-between items-center pt-1">
-                                                <select value={editTechRole} onChange={e => setEditTechRole(e.target.value as any)} className="text-[10px] p-1 border rounded">
-                                                    <option value="user">User</option>
-                                                    <option value="admin">Admin</option>
-                                                </select>
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => setEditingTechId(null)} className="text-gray-400 hover:text-gray-600"><CloseIcon /></button>
-                                                    <button onClick={saveEditedTech} className="text-green-500 hover:text-green-700"><CheckIcon /></button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="flex justify-between items-center">
-                                            <div className="truncate">
-                                                <span className="font-bold text-brand-700">[{t.code}]</span> {t.name}
-                                                <p className="text-[9px] text-gray-400">Rolle: {t.role} | NC-User: {t.nextcloudUser || 'Wie Name'}</p>
-                                            </div>
-                                            <div className="flex gap-1">
-                                                <button onClick={() => startEditingTech(t)} className="p-1 text-brand-400 hover:text-brand-600"><EditIcon /></button>
-                                                {t.id !== currentUser?.id && (
-                                                    <button onClick={() => { if(confirm("Nutzer löschen?")) saveConfig({...config, technicians: config.technicians.filter(tech => tech.id !== t.id)}) }} className="p-1 text-red-300 hover:text-red-500"><TrashIcon /></button>
-                                                )}
-                                            </div>
-                                        </div>
+                                    <label className="block w-full py-2 px-4 bg-brand-primary text-white rounded-lg cursor-pointer hover:bg-brand-primary/90 text-sm font-bold mb-2">
+                                        Neues Logo hochladen
+                                        <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                                    </label>
+                                    {config.logo && (
+                                        <button onClick={() => saveConfig({ ...config, logo: undefined })} className="text-[10px] text-red-500 font-bold uppercase tracking-wider">Logo zurücksetzen</button>
                                     )}
                                 </div>
-                            ))}
+                            </div>
+
+                            <div className="space-y-4 border-t pt-4">
+                                <h4 className="text-xs font-bold uppercase text-brand-primary">System</h4>
+                                <div className="bg-gray-50 p-4 rounded-xl border space-y-3">
+                                    <p className="text-[11px] text-gray-600 font-medium leading-relaxed">System-Einstellungen und Konfiguration.</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4 border-t pt-4">
+                                <h4 className="text-xs font-bold uppercase text-brand-600">Backup & Sicherheit</h4>
+                                <div className="bg-slate-100 p-4 rounded-xl border space-y-3">
+                                    <p className="text-[11px] text-gray-500 leading-relaxed">Sichern Sie Ihre Konfiguration regelmäßig.</p>
+                                    <Button onClick={handleExportConfig} variant="outline" className="w-full text-xs py-2">
+                                        <BackupIcon /> Konfiguration exportieren
+                                    </Button>
+                                    <label className="block w-full py-2 px-4 bg-white border border-gray-300 text-gray-700 rounded-md cursor-pointer hover:bg-gray-50 text-center text-xs font-medium">
+                                        Backup importieren
+                                        <input type="file" ref={importFileRef} accept=".json" onChange={handleImportConfig} className="hidden" />
+                                    </label>
+                                </div>
+                            </div>
                         </div>
-                        <div className="bg-gray-100 p-3 rounded-lg border">
-                            <h5 className="text-[10px] font-bold text-gray-500 uppercase mb-2">Techniker neu anlegen</h5>
-                            <input placeholder="Name" value={newTechName} onChange={e => setNewTechName(e.target.value)} className="w-full p-2 border rounded text-xs mb-2 shadow-inner" />
-                            <div className="grid grid-cols-2 gap-2 mb-2">
-                                <input placeholder="Kürzel" value={newTechCode} onChange={e => setNewTechCode(e.target.value)} className="w-full p-2 border rounded text-xs uppercase" />
-                                <input placeholder="Login-Passwort" value={newTechPass} onChange={e => setNewTechPass(e.target.value)} className="w-full p-2 border rounded text-xs" />
+
+                        {/* Spalte 2: Einsatzgebiete */}
+                        <div className="space-y-4">
+                            <h4 className="text-xs font-bold uppercase text-brand-primary">Einsatzgebiete / Projekte</h4>
+                            <div className="space-y-2 mb-4 max-h-48 overflow-y-auto border rounded-lg p-2 bg-gray-50">
+                                {config.projects.length === 0 && <p className="text-xs text-gray-400 text-center py-4">Keine Einsatzgebiete angelegt.</p>}
+                                {config.projects.map(p => (
+                                    <div key={p.token} className="flex flex-col p-2 bg-white rounded border text-sm shadow-sm gap-2">
+                                        <div className="flex justify-between items-center">
+                                            <div className="flex-1">
+                                                <span className="font-medium truncate">{p.name}</span>
+                                                <p className="text-[10px] text-slate-400">Pfad: {p.nextcloudPath || '/Bautagebuch'}</p>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button 
+                                                    onClick={() => {
+                                                        if (!nextcloudCreds) return alert("Bitte zuerst einloggen.");
+                                                        setBrowseCallback(() => (selectedPath: string) => {
+                                                            const updatedProjects = config.projects.map(pr => 
+                                                                pr.token === p.token ? { ...pr, nextcloudPath: selectedPath } : pr
+                                                            );
+                                                            saveConfig({ ...config, projects: updatedProjects });
+                                                        });
+                                                        handleBrowseFolders();
+                                                    }}
+                                                    className="text-blue-500 p-1 hover:bg-blue-50 rounded"
+                                                    title="Ordner auswählen"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                                                </button>
+                                                <button onClick={() => { if(confirm("Einsatzgebiet löschen?")) saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)}) }} className="text-red-400 p-1"><TrashIcon /></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
-                            <div className="grid grid-cols-2 gap-2 mb-2">
-                                <input placeholder="Nextcloud Benutzername (Optional)" value={newTechNextcloudUser} onChange={e => setNewTechNextcloudUser(e.target.value)} className="w-full p-2 border rounded text-xs shadow-inner" />
-                                <input placeholder="Nextcloud App-Passwort (Optional)" value={newTechNextcloudPass} onChange={e => setNewTechNextcloudPass(e.target.value)} className="w-full p-2 border rounded text-xs shadow-inner" />
+                            <div className="space-y-2 bg-white p-3 rounded-lg border shadow-sm">
+                                <input placeholder="Name des Einsatzgebiets" value={newProjName} onChange={e => setNewProjName(e.target.value)} className="w-full p-2 border rounded text-sm" />
+                                <div className="flex gap-2">
+                                    <input placeholder="Nextcloud Pfad (z.B. /Projekte/Berlin)" value={newProjLink} onChange={e => setNewProjLink(e.target.value)} className="flex-1 p-2 border rounded text-sm" />
+                                    <button 
+                                        onClick={() => {
+                                            if (!nextcloudCreds) return alert("Bitte zuerst einloggen.");
+                                            setBrowseCallback(() => (selectedPath: string) => {
+                                                setNewProjLink(selectedPath);
+                                            });
+                                            handleBrowseFolders();
+                                        }}
+                                        className="bg-blue-100 text-blue-600 px-3 rounded-lg text-[10px] font-bold uppercase"
+                                    >
+                                        Wählen
+                                    </button>
+                                </div>
+                                <Button onClick={() => {
+                                    if (!newProjName) return alert("Bitte Namen eingeben.");
+                                    const token = Math.random().toString(36).substr(2, 9);
+                                    saveConfig({...config, projects: [...config.projects, { name: newProjName, link: '', token, nextcloudPath: newProjLink || '/Bautagebuch' }]});
+                                    setNewProjName('');
+                                    setNewProjLink('');
+                                }} className="w-full">Hinzufügen</Button>
                             </div>
-                            <select value={newTechRole} onChange={e => setNewTechRole(e.target.value as any)} className="w-full p-2 border rounded text-xs bg-white mb-2 shadow-inner">
-                                <option value="user">Techniker (User)</option>
-                                <option value="admin">Administrator</option>
-                            </select>
-                            <Button onClick={() => {
-                                if (!newTechName || !newTechCode) return alert("Felder füllen.");
-                                saveConfig({...config, technicians: [...config.technicians, { 
-                                    id: Date.now().toString(), 
-                                    name: newTechName, 
-                                    code: newTechCode.toUpperCase(), 
-                                    password: newTechPass, 
-                                    nextcloudUser: newTechNextcloudUser || newTechName,
-                                    nextcloudPass: newTechNextcloudPass,
-                                    role: newTechRole 
-                                }]});
-                                setNewTechName(''); setNewTechCode(''); setNewTechPass(''); setNewTechNextcloudUser(''); setNewTechNextcloudPass('');
-                            }} variant="secondary" className="w-full py-1 text-xs">Techniker hinzufügen</Button>
+                        </div>
+
+                        {/* Spalte 3: Technikerverwaltung */}
+                        <div className="space-y-4">
+                            <h4 className="text-xs font-bold uppercase text-brand-primary">Techniker & Passwörter</h4>
+                            <div className="space-y-2 mb-4 max-h-64 overflow-y-auto border rounded-lg p-2 bg-gray-50">
+                                {config.technicians.map(t => (
+                                    <div key={t.id} className={`flex flex-col p-2 bg-white rounded border text-sm shadow-sm ${editingTechId === t.id ? 'border-brand-500 bg-brand-50' : 'border-gray-100'}`}>
+                                        {editingTechId === t.id ? (
+                                            <div className="space-y-2">
+                                                <input value={editTechName} onChange={e => setEditTechName(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Name" />
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <input value={editTechCode} onChange={e => setEditTechCode(e.target.value)} className="w-full p-1 border rounded text-xs uppercase" placeholder="Kürzel" />
+                                                    <input value={editTechPass} onChange={e => setEditTechPass(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Login-Passwort" />
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <input value={editTechNextcloudUser} onChange={e => setEditTechNextcloudUser(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Nextcloud Benutzername" />
+                                                    <input value={editTechNextcloudPass} onChange={e => setEditTechNextcloudPass(e.target.value)} className="w-full p-1 border rounded text-xs" placeholder="Nextcloud App-Passwort" />
+                                                </div>
+                                                <div className="flex justify-between items-center pt-1">
+                                                    <select value={editTechRole} onChange={e => setEditTechRole(e.target.value as any)} className="text-[10px] p-1 border rounded">
+                                                        <option value="user">User</option>
+                                                        <option value="admin">Admin</option>
+                                                    </select>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => setEditingTechId(null)} className="text-gray-400 hover:text-gray-600"><CloseIcon /></button>
+                                                        <button onClick={saveEditedTech} className="text-green-500 hover:text-green-700"><CheckIcon /></button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="flex justify-between items-center">
+                                                <div className="truncate">
+                                                    <span className="font-bold text-brand-700">[{t.code}]</span> {t.name}
+                                                    <p className="text-[9px] text-gray-400">Rolle: {t.role} | NC-User: {t.nextcloudUser || 'Wie Name'}</p>
+                                                </div>
+                                                <div className="flex gap-1">
+                                                    <button onClick={() => startEditingTech(t)} className="p-1 text-brand-400 hover:text-brand-600"><EditIcon /></button>
+                                                    {t.id !== currentUser?.id && (
+                                                        <button onClick={() => { if(confirm("Nutzer löschen?")) saveConfig({...config, technicians: config.technicians.filter(tech => tech.id !== t.id)}) }} className="p-1 text-red-300 hover:text-red-500"><TrashIcon /></button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="bg-gray-100 p-3 rounded-lg border">
+                                <h5 className="text-[10px] font-bold text-gray-500 uppercase mb-2">Techniker neu anlegen</h5>
+                                <input placeholder="Name" value={newTechName} onChange={e => setNewTechName(e.target.value)} className="w-full p-2 border rounded text-xs mb-2 shadow-inner" />
+                                <div className="grid grid-cols-2 gap-2 mb-2">
+                                    <input placeholder="Kürzel" value={newTechCode} onChange={e => setNewTechCode(e.target.value)} className="w-full p-2 border rounded text-xs uppercase" />
+                                    <input placeholder="Login-Passwort" value={newTechPass} onChange={e => setNewTechPass(e.target.value)} className="w-full p-2 border rounded text-xs" />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 mb-2">
+                                    <input placeholder="Nextcloud Benutzername (Optional)" value={newTechNextcloudUser} onChange={e => setNewTechNextcloudUser(e.target.value)} className="w-full p-2 border rounded text-xs shadow-inner" />
+                                    <input placeholder="Nextcloud App-Passwort (Optional)" value={newTechNextcloudPass} onChange={e => setNewTechNextcloudPass(e.target.value)} className="w-full p-2 border rounded text-xs shadow-inner" />
+                                </div>
+                                <select value={newTechRole} onChange={e => setNewTechRole(e.target.value as any)} className="w-full p-2 border rounded text-xs bg-white mb-2 shadow-inner">
+                                    <option value="user">Techniker (User)</option>
+                                    <option value="admin">Administrator</option>
+                                </select>
+                                <Button onClick={() => {
+                                    if (!newTechName || !newTechCode) return alert("Felder füllen.");
+                                    saveConfig({...config, technicians: [...config.technicians, { 
+                                        id: Date.now().toString(), 
+                                        name: newTechName, 
+                                        code: newTechCode.toUpperCase(), 
+                                        password: newTechPass, 
+                                        nextcloudUser: newTechNextcloudUser || newTechName,
+                                        nextcloudPass: newTechNextcloudPass,
+                                        role: newTechRole 
+                                    }]});
+                                    setNewTechName(''); setNewTechCode(''); setNewTechPass(''); setNewTechNextcloudUser(''); setNewTechNextcloudPass('');
+                                }} variant="secondary" className="w-full py-1 text-xs">Techniker hinzufügen</Button>
+                            </div>
                         </div>
                     </div>
-                </div>
                 </div>
                 
                 <div className="pt-6 mt-8 border-t flex justify-between items-center">
@@ -2304,7 +2042,7 @@ export default function App() {
                 <p className="text-sm text-slate-600 leading-relaxed ml-11">
                   Gehen Sie in Nextcloud zu <span className="font-bold">Einstellungen &rarr; Mobil & Desktop</span>. 
                   Kopieren Sie dort ganz unten den <span className="font-bold">WebDAV-Link</span>. 
-                  Fügen Sie diesen Link in der App unter <span className="italic">Einstellungen &rarr; Nextcloud Server URL</span> ein.
+                  Fügen Sie diesen Link in der App direkt im Anmeldefenster unter <span className="italic">Nextcloud Server URL</span> ein.
                   <code className="text-[10px] bg-slate-100 p-1 block mt-2 rounded break-all">https://nc-123.nextcloud-ionos.com/remote.php/dav/files/user/</code>
                 </p>
               </section>
@@ -2312,11 +2050,11 @@ export default function App() {
               <section className="space-y-3">
                 <div className="flex items-center gap-3">
                   <span className="w-8 h-8 bg-brand-primary text-white rounded-full flex items-center justify-center font-black text-sm">3</span>
-                  <h4 className="font-bold text-slate-800">In der App eintragen</h4>
+                  <h4 className="font-bold text-slate-800">Anmeldung</h4>
                 </div>
                 <p className="text-sm text-slate-600 leading-relaxed ml-11">
-                  Melden Sie sich als Administrator an (Code: <span className="font-bold">ADMIN</span>, Passwort: <span className="font-bold">admin123</span>). 
-                  Gehen Sie in die Einstellungen und fügen Sie den kopierten Link bei <span className="font-bold">"Manueller WebDAV-Pfad"</span> ein.
+                  Geben Sie Ihre Server-URL, Ihren Benutzernamen und das App-Passwort ein. 
+                  Die App verbindet sich dann automatisch mit Ihrer Nextcloud und meldet Sie gleichzeitig an.
                 </p>
               </section>
 
