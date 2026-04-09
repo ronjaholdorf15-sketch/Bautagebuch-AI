@@ -4,30 +4,30 @@ import cors from "cors";
 import path from "path";
 import axios from "axios";
 
-// AIS Nextcloud Bridge Server v7
-// Minimalist approach to bypass all routing issues.
+// AIS Nextcloud Bridge Server v8
+// Extreme logging and top-level route definition.
 
 const app = express();
 const PORT = 3000;
+
+console.log('[BOOT] Starting AIS Server v8...');
 
 // 1. Basic Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-// 2. API Routes - DEFINED FIRST AND AT THE TOP LEVEL
-// We use a very specific path to avoid any SPA rewrites
-app.get('/ais-v7-ping', (req, res) => {
-  console.log('[AIS] Ping V7');
-  res.setHeader('X-AIS-Server', 'Express-v7-Final');
+// 2. API Routes - DEFINED AT THE VERY TOP
+app.all('/ais-v8-ping', (req, res) => {
+  console.log('[AIS] Ping V8 Received');
+  res.setHeader('X-AIS-Server', 'Express-v8-Final');
   res.setHeader('X-AIS-Timestamp', new Date().toISOString());
-  res.json({ status: 'ok', version: '7.0.0' });
+  res.json({ status: 'ok', version: '8.0.0', env: process.env.NODE_ENV });
 });
 
-app.post('/ais-v7-bridge', async (req, res) => {
+app.post('/ais-v8-bridge', async (req, res) => {
   const { url, method, username, password, data, headers: customHeaders } = req.body;
-  
-  console.log(`[AIS] Bridge V7: ${method} -> ${url}`);
-  res.setHeader('X-AIS-Server', 'Express-v7-Final');
+  console.log(`[AIS] Bridge V8 Request: ${method} -> ${url}`);
+  res.setHeader('X-AIS-Server', 'Express-v8-Final');
   res.setHeader('X-AIS-Timestamp', new Date().toISOString());
 
   if (!url) return res.status(400).send('Missing URL');
