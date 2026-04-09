@@ -641,7 +641,7 @@ export default function App() {
     async exists(url: string, creds: { user: string, pass: string }) {
       try {
         const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`;
-        const response = await fetch('/api/nc-bridge', {
+        const response = await fetch('/nc-bridge-v1', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -658,7 +658,7 @@ export default function App() {
         
         // If PROPFIND is not allowed, try GET
         if (response.status === 405) {
-          const getResponse = await fetch('/api/nc-bridge', {
+          const getResponse = await fetch('/nc-bridge-v1', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, method: 'GET', username: creds.user, password: creds.pass })
@@ -673,7 +673,7 @@ export default function App() {
       }
     },
     async createDirectory(url: string, creds: { user: string, pass: string }) {
-      const response = await fetch('/api/nc-bridge', {
+      const response = await fetch('/nc-bridge-v1', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -695,7 +695,7 @@ export default function App() {
       });
       const base64 = await base64Promise;
 
-      const response = await fetch('/api/nc-bridge', {
+      const response = await fetch('/nc-bridge-v1', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -713,7 +713,7 @@ export default function App() {
     },
     async listFolders(url: string, creds: { user: string, pass: string }) {
       const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/><d:resourcetype/></d:prop></d:propfind>`;
-      const response = await fetch('/api/nc-bridge', {
+      const response = await fetch('/nc-bridge-v1', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1923,7 +1923,7 @@ export default function App() {
                                                     try {
                                                         log += "--- DIAGNOSE START ---\n";
                                                         log += "Prüfe AIS-Server Erreichbarkeit... ";
-                                                        const pingRes = await fetch('/api/nc-ping');
+                                                        const pingRes = await fetch('/nc-ping-v1');
                                                         const aisServer = pingRes.headers.get('X-AIS-Server');
                                                         log += `Status: ${pingRes.status} [AIS-Server: ${aisServer || 'NICHT GEFUNDEN'}]\n`;
                                                         if (aisServer !== 'Express-v1') {
@@ -1948,7 +1948,7 @@ export default function App() {
                                                         try {
                                                             await new Promise(r => setTimeout(r, 200));
                                                             log += `Prüfe Server-Status: ${sUrl} ... `;
-                                                            const sRes = await fetch('/api/nc-bridge', {
+                                                            const sRes = await fetch('/nc-bridge-v1', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
                                                                 body: JSON.stringify({ url: sUrl, method: 'GET' })
@@ -1973,7 +1973,7 @@ export default function App() {
                                                         log += `Prüfe: ${url} ... `;
                                                         try {
                                                             // Try OPTIONS first
-                                                            const optRes = await fetch('/api/nc-bridge', {
+                                                            const optRes = await fetch('/nc-bridge-v1', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
                                                                 body: JSON.stringify({ url, method: 'OPTIONS', username: user, password: pass })
@@ -1981,7 +1981,7 @@ export default function App() {
                                                             const optText = await optRes.text();
                                                             log += `(OPTIONS: ${optRes.status}) `;
 
-                                                            let res = await fetch('/api/nc-bridge', {
+                                                            let res = await fetch('/nc-bridge-v1', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
                                                                 body: JSON.stringify({ 
@@ -1996,7 +1996,7 @@ export default function App() {
                                                             
                                                             if (res.status === 405) {
                                                                 log += `(PROPFIND 405 -> Versuche GET) `;
-                                                                res = await fetch('/api/nc-bridge', {
+                                                                res = await fetch('/nc-bridge-v1', {
                                                                     method: 'POST',
                                                                     headers: { 'Content-Type': 'application/json' },
                                                                     body: JSON.stringify({ url, method: 'GET', username: user, password: pass })

@@ -17,7 +17,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // Nextcloud Proxy Routes to bypass CORS
-app.post('/api/nc-bridge', async (req, res) => {
+app.post('/nc-bridge-v1', async (req, res) => {
   const { url, method, username, password, data, headers: customHeaders } = req.body;
 
   if (!url) {
@@ -76,8 +76,8 @@ app.post('/api/nc-bridge', async (req, res) => {
   }
 });
 
-app.get('/api/nc-ping', (req, res) => {
-  res.json({ status: 'ok', server: 'AIS-Express' });
+app.get('/nc-ping-v1', (req, res) => {
+  res.json({ status: 'ok', server: 'AIS-Express-v1' });
 });
 
 // Vite Middleware für die Frontend-Dateien
@@ -98,7 +98,8 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server läuft auf http://localhost:${PORT}`);
+    console.log(`[SERVER START] AIS Nextcloud Bridge running on http://localhost:${PORT}`);
+    console.log(`[SERVER START] Routes: /nc-bridge-v1 (POST), /nc-ping-v1 (GET)`);
   });
 }
 
