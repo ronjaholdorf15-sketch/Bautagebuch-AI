@@ -641,7 +641,7 @@ export default function App() {
     async exists(url: string, creds: { user: string, pass: string }) {
       try {
         const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`;
-        const response = await fetch('/nc-bridge-v2', {
+        const response = await fetch('/nc-bridge-v3', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -658,7 +658,7 @@ export default function App() {
         
         // If PROPFIND is not allowed, try GET
         if (response.status === 405) {
-          const getResponse = await fetch('/nc-bridge-v2', {
+          const getResponse = await fetch('/nc-bridge-v3', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, method: 'GET', username: creds.user, password: creds.pass })
@@ -673,7 +673,7 @@ export default function App() {
       }
     },
     async createDirectory(url: string, creds: { user: string, pass: string }) {
-      const response = await fetch('/nc-bridge-v2', {
+      const response = await fetch('/nc-bridge-v3', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -695,7 +695,7 @@ export default function App() {
       });
       const base64 = await base64Promise;
 
-      const response = await fetch('/nc-bridge-v2', {
+      const response = await fetch('/nc-bridge-v3', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -713,7 +713,7 @@ export default function App() {
     },
     async listFolders(url: string, creds: { user: string, pass: string }) {
       const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/><d:resourcetype/></d:prop></d:propfind>`;
-      const response = await fetch('/nc-bridge-v2', {
+      const response = await fetch('/nc-bridge-v3', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1923,16 +1923,20 @@ export default function App() {
                                                     try {
                                                         log += "--- DIAGNOSE START ---\n";
                                                         log += "Prüfe AIS-Server Erreichbarkeit... ";
-                                                        const pingRes = await fetch('/nc-ping-v2');
+                                                        const pingRes = await fetch('/nc-ping-v3');
                                                         const aisServer = pingRes.headers.get('X-AIS-Server');
-                                                        const aisDebug = pingRes.headers.get('X-AIS-Debug');
-                                                        log += `Status: ${pingRes.status} [AIS-Server: ${aisServer || 'NICHT GEFUNDEN'}] [Debug: ${aisDebug || '?'}]\n`;
+                                                        const aisTime = pingRes.headers.get('X-AIS-Timestamp');
+                                                        log += `Status: ${pingRes.status} [AIS-Server: ${aisServer || 'NICHT GEFUNDEN'}] [Time: ${aisTime || '?'}]\n`;
                                                         
                                                         if (pingRes.status === 200) {
-                                                            const pingData = await pingRes.json();
-                                                            log += `Server-Info: ${pingData.server} (Env: ${pingData.env}) (Time: ${pingData.time})\n`;
+                                                            try {
+                                                                const pingData = await pingRes.json();
+                                                                log += `Server-Info: ${pingData.version} (Node: ${pingData.node}) (Env: ${pingData.env})\n`;
+                                                            } catch (e) {
+                                                                log += `HINWEIS: Antwort ist kein JSON (evtl. SPA-Fallback).\n`;
+                                                            }
                                                         }
-                                                        if (aisServer !== 'Express-v1') {
+                                                        if (aisServer !== 'Express-v3') {
                                                             log += "WARNUNG: Anfragen werden eventuell abgefangen (Server-Header fehlt).\n";
                                                         }
                                                     } catch (e) {
@@ -1954,7 +1958,7 @@ export default function App() {
                                                         try {
                                                             await new Promise(r => setTimeout(r, 200));
                                                             log += `Prüfe Server-Status: ${sUrl} ... `;
-                                                            const sRes = await fetch('/nc-bridge-v2', {
+                                                            const sRes = await fetch('/nc-bridge-v3', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
                                                                 body: JSON.stringify({ url: sUrl, method: 'GET' })
@@ -1965,8 +1969,8 @@ export default function App() {
                                                             const proxyStatus = sRes.headers.get('X-Proxy-Status');
                                                             const ncServer = sRes.headers.get('X-Nextcloud-Server') || sRes.headers.get('server');
                                                             const aisHeader = sRes.headers.get('X-AIS-Server');
-                                                            const aisDebug = sRes.headers.get('X-AIS-Debug');
-                                                            log += `Status: ${sRes.status} (Proxy: ${proxyStatus || '?'}) [AIS: ${aisHeader || '?'}] [Debug: ${aisDebug || '?'}] (${sText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} ${ncVersion ? `[NC: ${ncVersion}]` : ''} [Server: ${ncServer || '?'}]\n`;
+                                                            const aisTime = sRes.headers.get('X-AIS-Timestamp');
+                                                            log += `Status: ${sRes.status} (Proxy: ${proxyStatus || '?'}) [AIS: ${aisHeader || '?'}] [Time: ${aisTime || '?'}] (${sText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} ${ncVersion ? `[NC: ${ncVersion}]` : ''} [Server: ${ncServer || '?'}]\n`;
                                                             if (sRes.status === 200 && (sText.includes('version') || ncVersion)) {
                                                                 log += "ERFOLG: Nextcloud-Server unter dieser URL bestätigt!\n";
                                                                 break;
@@ -1980,7 +1984,7 @@ export default function App() {
                                                         log += `Prüfe: ${url} ... `;
                                                         try {
                                                             // Try OPTIONS first
-                                                            const optRes = await fetch('/nc-bridge-v2', {
+                                                            const optRes = await fetch('/nc-bridge-v3', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
                                                                 body: JSON.stringify({ url, method: 'OPTIONS', username: user, password: pass })
@@ -1988,7 +1992,7 @@ export default function App() {
                                                             const optText = await optRes.text();
                                                             log += `(OPTIONS: ${optRes.status}) `;
 
-                                                            let res = await fetch('/nc-bridge-v2', {
+                                                            let res = await fetch('/nc-bridge-v3', {
                                                                 method: 'POST',
                                                                 headers: { 'Content-Type': 'application/json' },
                                                                 body: JSON.stringify({ 
@@ -2003,7 +2007,7 @@ export default function App() {
                                                             
                                                             if (res.status === 405) {
                                                                 log += `(PROPFIND 405 -> Versuche GET) `;
-                                                                res = await fetch('/nc-bridge-v2', {
+                                                                res = await fetch('/nc-bridge-v3', {
                                                                     method: 'POST',
                                                                     headers: { 'Content-Type': 'application/json' },
                                                                     body: JSON.stringify({ url, method: 'GET', username: user, password: pass })
@@ -2015,8 +2019,8 @@ export default function App() {
                                                             const proxyStatus = res.headers.get('X-Proxy-Status');
                                                             const ncServer = res.headers.get('X-Nextcloud-Server') || res.headers.get('server');
                                                             const aisHeader = res.headers.get('X-AIS-Server');
-                                                            const aisDebug = res.headers.get('X-AIS-Debug');
-                                                            log += `Status: ${res.status} (Proxy: ${proxyStatus || '?'}) [AIS: ${aisHeader || '?'}] [Debug: ${aisDebug || '?'}] (${resText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} [Server: ${ncServer || '?'}]\n`;
+                                                            const aisTime = res.headers.get('X-AIS-Timestamp');
+                                                            log += `Status: ${res.status} (Proxy: ${proxyStatus || '?'}) [AIS: ${aisHeader || '?'}] [Time: ${aisTime || '?'}] (${resText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} [Server: ${ncServer || '?'}]\n`;
                                                             
                                                             if (res.status === 207 || res.status === 401 || (res.status === 200 && (url.includes('remote.php') || resText.includes('Nextcloud')))) {
                                                                 found = true;

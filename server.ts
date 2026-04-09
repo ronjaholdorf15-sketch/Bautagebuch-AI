@@ -4,43 +4,43 @@ import cors from "cors";
 import path from "path";
 import axios from "axios";
 
-const app = express();
-const PORT = 3000;
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // 1. Logging Middleware (First!)
-  app.use((req, res, next) => {
-    console.log(`[REQUEST] ${req.method} ${req.url}`);
-    res.setHeader('X-AIS-Debug', 'Active');
-    res.setHeader('X-AIS-Server', 'Express-v1');
-    next();
-  });
-
+  // 1. Basic Middleware
   app.use(cors());
   app.use(express.json({ limit: '50mb' }));
 
-  // 2. API Routes
-  app.get('/healthz', (req, res) => res.send('ok'));
-  
-  app.get('/nc-ping-v2', (req, res) => {
-    console.log('Ping received');
+  // 2. Logging & Identification
+  app.use((req, res, next) => {
+    console.log(`[INCOMING] ${req.method} ${req.url}`);
+    res.setHeader('X-AIS-Server', 'Express-v3');
+    res.setHeader('X-AIS-Timestamp', new Date().toISOString());
+    next();
+  });
+
+  // 3. API Routes (Explicitly before static/vite)
+  app.get('/nc-ping-v3', (req, res) => {
+    console.log('Ping V3 received');
     res.json({ 
       status: 'ok', 
-      server: 'AIS-Express-v2',
-      env: process.env.NODE_ENV,
-      time: new Date().toISOString()
+      version: '3.0.0',
+      node: process.version,
+      env: process.env.NODE_ENV 
     });
   });
 
-  app.post('/nc-bridge-v2', async (req, res) => {
+  app.all('/nc-bridge-v3', async (req, res) => {
     const { url, method, username, password, data, headers: customHeaders } = req.body;
-    console.log(`Bridge request to: ${url} [${method}]`);
+    
+    if (!url && req.method === 'POST') {
+      return res.status(400).send('Missing URL');
+    }
 
-    if (!url) {
-      return res.status(400).send('Missing URL parameter');
+    // For GET requests to the bridge (testing)
+    if (req.method === 'GET') {
+      return res.json({ message: 'Bridge is active. Use POST to proxy requests.' });
     }
 
     try {
@@ -60,7 +60,7 @@ async function startServer() {
         responseType: 'arraybuffer',
         maxRedirects: 5,
         validateStatus: () => true,
-        timeout: 15000
+        timeout: 20000
       };
 
       if (data) {
@@ -69,10 +69,11 @@ async function startServer() {
           : data;
       }
 
+      console.log(`[PROXY] ${axiosConfig.method} -> ${url}`);
       const response = await axios(axiosConfig);
-      console.log(`Target Response: ${response.status}`);
+      console.log(`[PROXY] Response: ${response.status}`);
 
-      // Forward relevant headers
+      // Forward headers
       const headersToForward = ['content-type', 'allow', 'webdav', 'dav', 'x-nextcloud-version', 'server'];
       headersToForward.forEach(h => {
         if (response.headers[h]) {
@@ -86,13 +87,13 @@ async function startServer() {
       res.status(response.status).send(response.data);
     } catch (error: any) {
       const status = error.response?.status || 500;
-      console.error('Bridge Error:', status, error.message);
+      console.error('[PROXY] Fatal Error:', status, error.message);
       res.setHeader('X-Proxy-Error', 'true');
       res.status(status).send(error.message);
     }
   });
 
-  // 3. Frontend / Static Files
+  // 4. Frontend / Static Files
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
@@ -103,13 +104,13 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*all', (req, res) => {
+    app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[READY] Server on port ${PORT}`);
+    console.log(`[READY] AIS Nextcloud Bridge v3 on port ${PORT}`);
   });
 }
 
