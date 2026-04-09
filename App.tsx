@@ -245,7 +245,8 @@ export default function App() {
     missingWork: '',
     materials: [],
     technician: '',
-    images: []
+    images: [],
+    nextcloudPath: ''
   });
   
   const [isAnalyzingImages, setIsAnalyzingImages] = useState(false);
@@ -770,28 +771,6 @@ export default function App() {
     setLoginPassword(''); 
   };
 
-  const handleBrowseFolders = async (path?: string) => {
-    if (!nextcloudCreds) return;
-    setBrowseLoading(true);
-    setIsBrowsingFolders(true);
-    try {
-      // If path is provided, use it, otherwise use the base webdavUrl
-      let url = nextcloudCreds.webdavUrl;
-      if (path) {
-        const urlObj = new URL(nextcloudCreds.webdavUrl);
-        url = `${urlObj.origin}${path}`;
-      }
-      
-      const folders = await nextcloudProxy.listFolders(url, { user: nextcloudCreds.user, pass: nextcloudCreds.pass });
-      setBrowseFolders(folders);
-      setCurrentBrowsePath(path || new URL(nextcloudCreds.webdavUrl).pathname);
-    } catch (err) {
-      alert("Fehler beim Laden der Ordner: " + err);
-    } finally {
-      setBrowseLoading(false);
-    }
-  };
-
   const downloadBlob = (blob: Blob, filename: string) => {
       try {
           const url = window.URL.createObjectURL(blob);
@@ -833,6 +812,43 @@ export default function App() {
       } finally {
           setIsGeneratingPdfOnly(false);
       }
+  };
+
+  const handleBrowseFolders = async (path?: string) => {
+    if (!nextcloudCreds) return;
+    setBrowseLoading(true);
+    setIsBrowsingFolders(true);
+    try {
+      // If path is provided, use it, otherwise use the base webdavUrl
+      let url = nextcloudCreds.webdavUrl;
+      if (path) {
+        const urlObj = new URL(nextcloudCreds.webdavUrl);
+        url = `${urlObj.origin}${path}`;
+      }
+      
+      const folders = await nextcloudProxy.listFolders(url, { user: nextcloudCreds.user, pass: nextcloudCreds.pass });
+      setBrowseFolders(folders);
+      setCurrentBrowsePath(path || new URL(nextcloudCreds.webdavUrl).pathname);
+    } catch (err) {
+      alert("Fehler beim Laden der Ordner: " + err);
+    } finally {
+      setBrowseLoading(false);
+    }
+  };
+
+  const handleFormBrowseFolders = async () => {
+    if (!nextcloudCreds) return alert("Bitte zuerst anmelden.");
+    setBrowseCallback(() => (selectedPath: string) => {
+      setEntry(prev => ({ ...prev, nextcloudPath: selectedPath }));
+    });
+    
+    // Start with current path or root
+    const basePath = new URL(nextcloudCreds.webdavUrl).pathname;
+    let startPath = entry.nextcloudPath || '/';
+    if (!startPath.startsWith('/')) startPath = '/' + startPath;
+    
+    const fullPath = `${basePath.replace(/\/$/, '')}${startPath}`;
+    handleBrowseFolders(fullPath);
   };
 
   const startEditingTech = (tech: Technician) => {
@@ -953,8 +969,8 @@ export default function App() {
         setUploadMessage("Lade in Nextcloud hoch...");
         try {
           const project = config.projects[selectedProjectIndex];
-          // Use global default folder if set, otherwise project specific, otherwise fallback
-          const folderPath = (config.defaultUploadFolder || project.nextcloudPath || '/Bautagebuch').replace(/\/$/, '');
+          // Use entry specific path if set, otherwise fallback to config/project defaults
+          const folderPath = (entry.nextcloudPath || config.defaultUploadFolder || project.nextcloudPath || '/Bautagebuch').replace(/\/$/, '');
           
           // Ensure folder exists (recursive)
           const folders = folderPath.split('/').filter(f => f);
@@ -1469,7 +1485,14 @@ export default function App() {
                         <div className="relative">
                           <select 
                             value={selectedProjectIndex} 
-                            onChange={(e) => setSelectedProjectIndex(Number(e.target.value))} 
+                            onChange={(e) => {
+                                const idx = Number(e.target.value);
+                                setSelectedProjectIndex(idx);
+                                if (idx !== -1) {
+                                  const project = config.projects[idx];
+                                  setEntry(prev => ({ ...prev, nextcloudPath: project.nextcloudPath || config.defaultUploadFolder || '/Bautagebuch' }));
+                                }
+                            }} 
                             required 
                             className="block w-full appearance-none rounded-2xl border-slate-200 p-5 border bg-slate-50/50 input-focus outline-none transition-all font-bold text-slate-700"
                           >
@@ -1480,6 +1503,31 @@ export default function App() {
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
                           </div>
                         </div>
+                    </div>
+
+                    {/* Nextcloud Folder Selection */}
+                    <div className="bg-white p-8 rounded-[2rem] shadow-soft border border-slate-100">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Nextcloud Zielordner</label>
+                        <div className="flex flex-col sm:flex-row gap-3">
+                            <div className="relative flex-1">
+                                <input 
+                                    type="text" 
+                                    placeholder="/Bautagebuch/Projektname" 
+                                    value={entry.nextcloudPath} 
+                                    onChange={e => setEntry({...entry, nextcloudPath: e.target.value})} 
+                                    className="block w-full rounded-2xl border-slate-200 p-5 border bg-slate-50/50 input-focus outline-none transition-all font-bold text-slate-700" 
+                                />
+                            </div>
+                            <Button 
+                                type="button" 
+                                variant="outline" 
+                                onClick={handleFormBrowseFolders}
+                                className="px-6 py-5 rounded-2xl border-slate-200 hover:bg-slate-50 text-slate-600 font-bold"
+                            >
+                                Durchsuchen
+                            </Button>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-2 ml-1 italic">Geben Sie den Pfad an oder nutzen Sie "Durchsuchen".</p>
                     </div>
 
                     {/* Metadata Grid */}
@@ -1875,17 +1923,30 @@ export default function App() {
                                                     const propfindBody = `<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`;
                                                     
                                                     // 0. Check Server Status first
-                                                    try {
-                                                        const statusUrl = `${cleanUrl}/status.php`;
-                                                        log += `Prüfe Server-Status: ${statusUrl} ... `;
-                                                        const sRes = await fetch('/api/nextcloud/proxy', {
-                                                            method: 'POST',
-                                                            headers: { 'Content-Type': 'application/json' },
-                                                            body: JSON.stringify({ url: statusUrl, method: 'GET' })
-                                                        });
-                                                        log += `Status: ${sRes.status}\n`;
-                                                    } catch (e) {
-                                                        log += `Fehler beim Status-Check: ${e}\n`;
+                                                    const statusUrls = [
+                                                        `${cleanUrl}/status.php`,
+                                                        `${cleanUrl}/index.php/status.php`,
+                                                        `${cleanUrl}/nextcloud/status.php`,
+                                                        `${cleanUrl}/nextcloud/index.php/status.php`
+                                                    ];
+                                                    
+                                                    for (const sUrl of statusUrls) {
+                                                        try {
+                                                            log += `Prüfe Server-Status: ${sUrl} ... `;
+                                                            const sRes = await fetch('/api/nextcloud/proxy', {
+                                                                method: 'POST',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ url: sUrl, method: 'GET', username: user, password: pass })
+                                                            });
+                                                            const sText = await sRes.text();
+                                                            log += `Status: ${sRes.status} (${sText.substring(0, 20)})\n`;
+                                                            if (sRes.status === 200 && sText.includes('version')) {
+                                                                log += "ERFOLG: Nextcloud-Server unter dieser URL bestätigt!\n";
+                                                                break;
+                                                            }
+                                                        } catch (e) {
+                                                            log += `Fehler beim Status-Check: ${e}\n`;
+                                                        }
                                                     }
 
                                                     for (const url of variations) {
@@ -1898,7 +1959,7 @@ export default function App() {
                                                                 body: JSON.stringify({ url, method: 'OPTIONS', username: user, password: pass })
                                                             });
                                                             const optText = await optRes.text();
-                                                            log += `(OPTIONS: ${optRes.status} ${optText.substring(0, 20)}) `;
+                                                            log += `(OPTIONS: ${optRes.status}) `;
 
                                                             let res = await fetch('/api/nextcloud/proxy', {
                                                                 method: 'POST',
@@ -1923,7 +1984,7 @@ export default function App() {
                                                             }
                                                             
                                                             const resText = await res.text();
-                                                            log += `Status: ${res.status} (${resText.substring(0, 30)})\n`;
+                                                            log += `Status: ${res.status} (${resText.substring(0, 20)})\n`;
                                                             
                                                             if (res.status === 207 || res.status === 401 || (res.status === 200 && (url.includes('remote.php') || resText.includes('Nextcloud')))) {
                                                                 found = true;
@@ -2240,32 +2301,31 @@ export default function App() {
       )}
 
       {isBrowsingFolders && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
-            <div className="bg-white rounded-3xl p-6 w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 p-4 backdrop-blur-sm">
+            <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-lg max-h-[80vh] flex flex-col shadow-2xl animate-scale-in">
                 <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Ordner auswählen</h3>
-                    <button onClick={() => setIsBrowsingFolders(false)} className="p-2 text-slate-400 hover:text-slate-600"><CloseIcon /></button>
+                    <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Ordner auswählen</h3>
+                    <button onClick={() => setIsBrowsingFolders(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all"><CloseIcon /></button>
                 </div>
                 
-                <div className="mb-4 p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></div>
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">Pfad: {currentBrowsePath || '/'}</span>
+                <div className="mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-3 overflow-hidden">
+                    <div className="w-2 h-2 rounded-full bg-brand-primary animate-pulse shrink-0"></div>
+                    <span className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-widest truncate">Pfad: {currentBrowsePath || '/'}</span>
                 </div>
 
                 <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
                     {browseLoading ? (
-                        <div className="flex flex-col items-center justify-center py-12">
-                            <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-blue-600 mb-4"></div>
+                        <div className="flex flex-col items-center justify-center py-20">
+                            <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-brand-primary mb-4"></div>
                             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Lade Ordner...</p>
                         </div>
                     ) : (
                         <>
-                            {currentBrowsePath && currentBrowsePath !== '/' && (
+                            {currentBrowsePath && (
                                 <button 
                                     onClick={() => {
                                         const parts = currentBrowsePath.split('/').filter(p => p);
                                         parts.pop();
-                                        // Find the remote.php/dav/files/user part to not go above it
                                         const basePath = new URL(nextcloudCreds?.webdavUrl || '').pathname;
                                         const newPath = '/' + parts.join('/') + '/';
                                         if (newPath.length < basePath.length) {
@@ -2274,7 +2334,8 @@ export default function App() {
                                             handleBrowseFolders(newPath);
                                         }
                                     }}
-                                    className="w-full p-4 flex items-center gap-3 bg-slate-50 hover:bg-slate-100 rounded-2xl border border-dashed border-slate-200 transition-all group"
+                                    disabled={currentBrowsePath === new URL(nextcloudCreds?.webdavUrl || '').pathname}
+                                    className="w-full p-4 flex items-center gap-3 bg-slate-50 hover:bg-slate-100 rounded-2xl border border-dashed border-slate-200 transition-all group disabled:opacity-30"
                                 >
                                     <div className="p-2 bg-white rounded-lg shadow-sm group-hover:scale-110 transition-transform">
                                         <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
@@ -2283,7 +2344,7 @@ export default function App() {
                                 </button>
                             )}
                             {browseFolders.length === 0 ? (
-                                <div className="text-center py-12">
+                                <div className="text-center py-20">
                                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Keine Unterordner gefunden</p>
                                 </div>
                             ) : (
@@ -2291,16 +2352,16 @@ export default function App() {
                                     <button 
                                         key={f.path}
                                         onClick={() => handleBrowseFolders(f.path)}
-                                        className="w-full p-4 flex items-center justify-between bg-white hover:bg-blue-50 rounded-2xl border border-slate-100 hover:border-blue-200 transition-all group"
+                                        className="w-full p-4 flex items-center justify-between bg-white hover:bg-slate-50 rounded-2xl border border-slate-100 hover:border-slate-200 transition-all group"
                                     >
                                         <div className="flex items-center gap-3">
-                                            <div className="p-2 bg-blue-100 rounded-lg text-blue-600 group-hover:scale-110 transition-transform">
+                                            <div className="p-2 bg-brand-primary/10 rounded-lg text-brand-primary group-hover:scale-110 transition-transform">
                                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
                                             </div>
                                             <span className="text-sm font-bold text-slate-700">{f.name}</span>
                                         </div>
                                         <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+                                            <svg className="w-4 h-4 text-brand-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
                                         </div>
                                     </button>
                                 ))
@@ -2309,25 +2370,21 @@ export default function App() {
                     )}
                 </div>
 
-                <div className="mt-6 pt-6 border-t border-slate-100 flex gap-3">
+                <div className="mt-8 pt-8 border-t border-slate-100 flex gap-4">
                     <Button 
                         variant="outline" 
                         onClick={() => setIsBrowsingFolders(false)}
-                        className="flex-1 py-4 rounded-2xl"
+                        className="flex-1 py-4 rounded-2xl font-bold"
                     >
                         Abbrechen
                     </Button>
                     <Button 
                         onClick={() => {
-                            // We want the path relative to the user's home if possible, 
-                            // or just the full path if that's what we have.
-                            // Nextcloud paths are usually /remote.php/dav/files/user/FOLDER
                             const basePath = new URL(nextcloudCreds?.webdavUrl || '').pathname;
                             let relativePath = currentBrowsePath || '/';
                             if (relativePath.startsWith(basePath)) {
                                 relativePath = relativePath.substring(basePath.length);
                             }
-                            // Ensure it starts with / and doesn't end with / unless it's just /
                             if (!relativePath.startsWith('/')) relativePath = '/' + relativePath;
                             if (relativePath.length > 1 && relativePath.endsWith('/')) relativePath = relativePath.slice(0, -1);
                             
@@ -2340,7 +2397,7 @@ export default function App() {
                             setIsBrowsingFolders(false);
                         }}
                         disabled={!currentBrowsePath}
-                        className="flex-1 py-4 rounded-2xl shadow-lg shadow-blue-600/20"
+                        className="flex-1 py-4 rounded-2xl font-bold shadow-lg shadow-brand-primary/20"
                     >
                         Auswählen
                     </Button>

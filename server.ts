@@ -15,22 +15,27 @@ app.post('/api/nextcloud/proxy', async (req, res) => {
   const { url, method, username, password, data, headers: customHeaders } = req.body;
 
   try {
+    const authHeader = (username && password) 
+      ? `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
+      : undefined;
+
     const axiosConfig: any = {
       url,
       method: method || 'GET',
-      auth: {
-        username,
-        password
-      },
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': '*/*',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/xml, text/plain, */*',
+        'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
         'X-Requested-With': 'XMLHttpRequest',
+        'X-NC-Apps-Version': '1.0.0',
+        ...(authHeader ? { 'Authorization': authHeader } : {}),
         ...customHeaders
       },
       responseType: 'arraybuffer',
       maxRedirects: 5,
-      validateStatus: () => true // Handle all status codes manually
+      validateStatus: () => true
     };
 
     if (data) {
@@ -39,7 +44,9 @@ app.post('/api/nextcloud/proxy', async (req, res) => {
         : data;
     }
 
+    console.log(`Proxy Request: ${axiosConfig.method} ${url} (User: ${username})`);
     const response = await axios(axiosConfig);
+    console.log(`Proxy Response: ${response.status} for ${url}`);
 
     // Forward relevant headers
     if (response.headers['content-type']) {

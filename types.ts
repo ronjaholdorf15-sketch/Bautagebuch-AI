@@ -42,6 +42,7 @@ export interface DiaryEntry {
   technician: string; // Full name
   technicianUid?: string; // Firebase UID
   images: File[];
+  nextcloudPath?: string; // Target folder for this specific entry
 }
 
 export interface FormStatus {
