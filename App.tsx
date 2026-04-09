@@ -1942,7 +1942,9 @@ export default function App() {
                                                             const sText = await sRes.text();
                                                             const allowHeader = sRes.headers.get('allow');
                                                             const ncVersion = sRes.headers.get('x-nextcloud-version');
-                                                            log += `Status: ${sRes.status} (${sText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} ${ncVersion ? `[NC: ${ncVersion}]` : ''} ${sRes.headers.get('server') ? `[Server: ${sRes.headers.get('server')}]` : ''}\n`;
+                                                            const proxyStatus = sRes.headers.get('X-Proxy-Status');
+                                                            const ncServer = sRes.headers.get('X-Nextcloud-Server') || sRes.headers.get('server');
+                                                            log += `Status: ${sRes.status} (Proxy: ${proxyStatus || '?'}) (${sText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} ${ncVersion ? `[NC: ${ncVersion}]` : ''} [Server: ${ncServer || '?'}]\n`;
                                                             if (sRes.status === 200 && (sText.includes('version') || ncVersion)) {
                                                                 log += "ERFOLG: Nextcloud-Server unter dieser URL bestätigt!\n";
                                                                 break;
@@ -1988,7 +1990,9 @@ export default function App() {
                                                             
                                                             const resText = await res.text();
                                                             const allowHeader = res.headers.get('allow');
-                                                            log += `Status: ${res.status} (${resText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} ${res.headers.get('server') ? `[Server: ${res.headers.get('server')}]` : ''}\n`;
+                                                            const proxyStatus = res.headers.get('X-Proxy-Status');
+                                                            const ncServer = res.headers.get('X-Nextcloud-Server') || res.headers.get('server');
+                                                            log += `Status: ${res.status} (Proxy: ${proxyStatus || '?'}) (${resText.substring(0, 20).trim()}) ${allowHeader ? `[Allow: ${allowHeader}]` : ''} [Server: ${ncServer || '?'}]\n`;
                                                             
                                                             if (res.status === 207 || res.status === 401 || (res.status === 200 && (url.includes('remote.php') || resText.includes('Nextcloud')))) {
                                                                 found = true;
