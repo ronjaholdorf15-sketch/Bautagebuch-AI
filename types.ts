@@ -3,7 +3,6 @@ export interface PublicProject {
   name: string;
   link: string; // The full public share URL
   token: string; // Extracted from link
-  nextcloudPath?: string; // Specific folder in Nextcloud for this project
 }
 
 export interface Technician {
@@ -12,18 +11,13 @@ export interface Technician {
   code: string; // Short code (e.g. MM)
   password?: string; // Login Password
   role: 'admin' | 'user'; // Rights management
-  nextcloudUser?: string; // Nextcloud Username
-  nextcloudPass?: string; // Nextcloud App Password
 }
 
 export interface AppConfig {
   technicians: Technician[];
   projects: PublicProject[];
   logo?: string; // Base64 encoded custom logo
-  nextcloudUrl?: string; // Base URL of the Nextcloud instance
-  manualWebdavUrl?: string; // Manual override for WebDAV URL
-  webdavUsername?: string; // Explicit WebDAV username
-  defaultUploadFolder?: string; // Target folder in Nextcloud
+  reportEmailList?: string[]; // List of emails for the 20:00 report
 }
 
 export interface MaterialItem {
@@ -42,7 +36,6 @@ export interface DiaryEntry {
   technician: string; // Full name
   technicianUid?: string; // Firebase UID
   images: File[];
-  nextcloudPath?: string; // Target folder for this specific entry
 }
 
 export interface FormStatus {

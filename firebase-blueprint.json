@@ -38,6 +38,17 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["date", "location", "technician", "technicianUid", "createdAt"]
+    },
+    "AppConfig": {
+      "title": "App Config",
+      "description": "Global application configuration",
+      "type": "object",
+      "properties": {
+        "reportEmailList": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
     }
   },
   "firestore": {
@@ -48,6 +59,10 @@
     "/diaryEntries/{entryId}": {
       "schema": "DiaryEntry",
       "description": "Technician diary entries"
+    },
+    "/config/app": {
+      "schema": "AppConfig",
+      "description": "Global application configuration"
     }
   }
 }

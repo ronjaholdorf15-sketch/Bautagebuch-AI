@@ -92,5 +92,10 @@ service cloud.firestore {
       allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidDiaryEntry(request.resource.data);
       allow delete: if isAdmin();
     }
+
+    match /config/app {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
   }
 }
