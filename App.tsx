@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AppConfig, Technician, PublicProject, FormStatus, DiaryEntry, WeatherCondition, MaterialItem } from './types';
 import * as geminiService from './services/geminiService';
+import { nextcloudService } from './services/nextcloudService';
 import { generateDiaryPdf } from './services/pdfService';
 import { Button } from './components/Button';
 import { Logo, getLogoAsBase64 } from './components/Logo';
@@ -325,13 +326,11 @@ export default function App() {
             const configDoc = await getDoc(doc(db, 'config', 'app'));
             if (configDoc.exists()) {
                 const data = configDoc.data();
-                if (data.reportEmailList) {
-                    setConfig(prev => {
-                        const updated = { ...prev, reportEmailList: data.reportEmailList };
-                        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-                        return updated;
-                    });
-                }
+                setConfig(prev => {
+                    const updated = { ...prev, ...data };
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+                    return updated;
+                });
             }
         } catch (e) {
             console.error("Failed to fetch global config:", e);
@@ -372,11 +371,9 @@ export default function App() {
     setConfig(newConfig);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newConfig));
     
-    // Sync reportEmailList to Firestore for the server-side cron job
+    // Sync to Firestore for persistence and server access
     try {
-        await setDoc(doc(db, 'config', 'app'), { 
-            reportEmailList: newConfig.reportEmailList || [] 
-        }, { merge: true });
+        await setDoc(doc(db, 'config', 'app'), newConfig, { merge: true });
     } catch (e) {
         console.error("Failed to sync config to Firestore:", e);
     }
@@ -646,7 +643,7 @@ export default function App() {
 
       // 2. Generate PDF
       setUploadMessage("Generiere PDF...");
-      let pdfBlob;
+      let pdfBlob: Blob;
       try {
         const logoBase64 = await getLogoAsBase64(config.logo);
         pdfBlob = await generateDiaryPdf(entry, project.name, logoBase64);
@@ -658,6 +655,36 @@ export default function App() {
         downloadBlob(pdfBlob, filename);
       } catch (e: any) {
         throw new Error(`Fehler bei der PDF-Erstellung: ${e.message}`);
+      }
+
+      // 3. Upload to Nextcloud
+      if (config.nextcloudUrl && config.nextcloudUser && config.nextcloudPass) {
+          setUploadMessage("Lade in Nextcloud hoch...");
+          try {
+              const customFolder = project.nextcloudPath || config.defaultUploadFolder || '/Bautagebuch';
+              const safeLocation = entry.location.replace(/[^a-zA-Z0-9]/g, '_');
+              const folderPath = `${customFolder}/${entry.date}_${safeLocation}`.replace(/\/+/g, '/');
+
+              // Ensure folder exists (at least the target folder)
+              await nextcloudService.createFolder(config, customFolder.replace(/\/+/g, '/'));
+              await nextcloudService.createFolder(config, folderPath);
+
+              setUploadMessage("Übertrage PDF...");
+              const pdfName = `Bautagebuch_${entry.date}_${safeLocation}.pdf`;
+              const pdfArrayBuffer = await pdfBlob.arrayBuffer();
+              await nextcloudService.uploadFile(config, `${folderPath}/${pdfName}`, pdfArrayBuffer);
+
+              // Upload Images
+              for (let i = 0; i < entry.images.length; i++) {
+                  const img = entry.images[i];
+                  setUploadMessage(`Übertrage Foto ${i + 1}/${entry.images.length}...`);
+                  const arrayBuffer = await img.arrayBuffer();
+                  await nextcloudService.uploadFile(config, `${folderPath}/Foto_${i + 1}.jpg`, arrayBuffer);
+              }
+          } catch (e: any) {
+              console.error("Nextcloud Upload Error:", e);
+              throw new Error(`Nextcloud-Übertragung fehlgeschlagen: ${e.message}`);
+          }
       }
       
       localStorage.removeItem(DRAFT_KEY);
@@ -1452,6 +1479,40 @@ export default function App() {
                             </div>
 
                             <div className="space-y-4 border-t pt-4">
+                                <h4 className="text-xs font-bold uppercase text-brand-primary">Nextcloud Anbindung</h4>
+                                <div className="bg-gray-50 p-4 rounded-xl border space-y-3">
+                                    <input 
+                                        placeholder="Nextcloud URL (z.B. https://nc.example.com)" 
+                                        value={config.nextcloudUrl || ''} 
+                                        onChange={e => saveConfig({...config, nextcloudUrl: e.target.value})} 
+                                        className="w-full p-2 border rounded text-xs" 
+                                    />
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <input 
+                                            placeholder="Benutzername" 
+                                            value={config.nextcloudUser || ''} 
+                                            onChange={e => saveConfig({...config, nextcloudUser: e.target.value})} 
+                                            className="w-full p-2 border rounded text-xs" 
+                                        />
+                                        <input 
+                                            type="password"
+                                            placeholder="App-Passwort" 
+                                            value={config.nextcloudPass || ''} 
+                                            onChange={e => saveConfig({...config, nextcloudPass: e.target.value})} 
+                                            className="w-full p-2 border rounded text-xs" 
+                                        />
+                                    </div>
+                                    <input 
+                                        placeholder="Standard Upload Ordner (z.B. /Bautagebuch)" 
+                                        value={config.defaultUploadFolder || ''} 
+                                        onChange={e => saveConfig({...config, defaultUploadFolder: e.target.value})} 
+                                        className="w-full p-2 border rounded text-xs" 
+                                    />
+                                    <p className="text-[9px] text-gray-400 italic">Die URL sollte bis zum Root Ihrer Nextcloud gehen. Keine WebDAV-Details anhängen.</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4 border-t pt-4">
                                 <h4 className="text-xs font-bold uppercase text-brand-600">Backup & Sicherheit</h4>
                                 <div className="bg-slate-100 p-4 rounded-xl border space-y-3">
                                     <p className="text-[11px] text-gray-500 leading-relaxed">Sichern Sie Ihre Konfiguration regelmäßig.</p>
@@ -1476,6 +1537,15 @@ export default function App() {
                                         <div className="flex justify-between items-center">
                                             <div className="flex-1">
                                                 <span className="font-medium truncate">{p.name}</span>
+                                                <input 
+                                                    placeholder="Eigener Ordner-Pfad (optional)" 
+                                                    value={p.nextcloudPath || ''} 
+                                                    onChange={e => {
+                                                        const updated = config.projects.map(pr => pr.token === p.token ? {...pr, nextcloudPath: e.target.value} : pr);
+                                                        saveConfig({...config, projects: updated});
+                                                    }}
+                                                    className="w-full mt-1 p-1 border rounded text-[10px] outline-none"
+                                                />
                                             </div>
                                             <div className="flex gap-2">
                                                 <button onClick={() => { if(confirm("Einsatzgebiet löschen?")) saveConfig({...config, projects: config.projects.filter(pr => pr.token !== p.token)}) }} className="text-red-400 p-1"><TrashIcon /></button>
@@ -1489,7 +1559,7 @@ export default function App() {
                                 <Button onClick={() => {
                                     if (!newProjName) return alert("Bitte Namen eingeben.");
                                     const token = Math.random().toString(36).substr(2, 9);
-                                    saveConfig({...config, projects: [...config.projects, { name: newProjName, link: '', token }]});
+                                    saveConfig({...config, projects: [...config.projects, { name: newProjName, token }]});
                                     setNewProjName('');
                                 }} className="w-full">Hinzufügen</Button>
                             </div>

@@ -1,8 +1,8 @@
 
 export interface PublicProject {
   name: string;
-  link: string; // The full public share URL
-  token: string; // Extracted from link
+  nextcloudPath?: string; 
+  token: string; 
 }
 
 export interface Technician {
@@ -16,8 +16,12 @@ export interface Technician {
 export interface AppConfig {
   technicians: Technician[];
   projects: PublicProject[];
-  logo?: string; // Base64 encoded custom logo
-  reportEmailList?: string[]; // List of emails for the 20:00 report
+  logo?: string; 
+  reportEmailList?: string[];
+  nextcloudUrl?: string;
+  nextcloudUser?: string;
+  nextcloudPass?: string;
+  defaultUploadFolder?: string;
 }
 
 export interface MaterialItem {

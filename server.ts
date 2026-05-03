@@ -27,6 +27,59 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.post('/api/bridge', async (req, res) => {
+  const { url, method, username, password, data, headers: customHeaders } = req.body;
+  console.log(`[AIS] Bridge Request: ${method} -> ${url}`);
+
+  if (!url) return res.status(400).send('Missing URL');
+
+  try {
+    const authHeader = (username && password) 
+      ? `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
+      : undefined;
+
+    const axiosConfig: any = {
+      url,
+      method: method || 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        ...(authHeader ? { 'Authorization': authHeader } : {}),
+        ...customHeaders
+      },
+      responseType: 'arraybuffer',
+      maxRedirects: 5,
+      validateStatus: () => true,
+      timeout: 30000
+    };
+
+    if (data) {
+      // Handle base64 data for file uploads
+      axiosConfig.data = typeof data === 'string' && data.startsWith('data:') 
+        ? Buffer.from(data.split(',')[1], 'base64') 
+        : data;
+    }
+
+    const axios = (await import("axios")).default;
+    const response = await axios(axiosConfig);
+    console.log(`[AIS] Target Response: ${response.status}`);
+
+    // Forward relevant headers
+    const headersToForward = ['content-type', 'allow', 'webdav', 'dav', 'x-nextcloud-version', 'server'];
+    headersToForward.forEach(h => {
+      if (response.headers[h]) {
+        res.setHeader(h, response.headers[h]);
+      }
+    });
+    
+    res.setHeader('X-Proxy-Status', response.status);
+    res.status(response.status).send(response.data);
+  } catch (error: any) {
+    console.error('[AIS] Bridge Error:', error.message);
+    res.status(500).send(error.message);
+  }
+});
+
 // 3. Daily Report Cron Job (Every day at 20:00)
 cron.schedule('0 20 * * *', async () => {
   console.log('[CRON] Starting daily material report at 20:00');
